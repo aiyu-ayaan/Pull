@@ -22,12 +22,16 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Terminal
@@ -123,6 +127,7 @@ internal fun ColumnScope.VideoBody(meta: VideoMeta, url: String, request: AddReq
             meta.durationSeconds.takeIf { it > 0 }?.let { formatDuration(it.toLong()) },
             size.takeIf { it > 0 && type != SheetType.COMMAND }?.let { stringResource(R.string.quality_size, formatBytes(it)) },
         ),
+        thumbnailUrl = meta.thumbnail,
     )
 
     Label(R.string.video_type)
@@ -190,10 +195,16 @@ internal fun ColumnScope.VideoBody(meta: VideoMeta, url: String, request: AddReq
         }
     }
 
+    val headersWithThumb = if (!meta.thumbnail.isNullOrBlank()) {
+        request.headers + ("X-Pull-Thumbnail" to meta.thumbnail)
+    } else {
+        request.headers
+    }
+
     Actions(
         enabled = !(custom && picked == null && type != SheetType.COMMAND),
-        onLater = { add { vm.addVideo(url, meta.title, format, args?.ifBlank { null }, request.headers, size, false) } },
-        onStart = { add { vm.addVideo(url, meta.title, format, args?.ifBlank { null }, request.headers, size, true) } },
+        onLater = { add { vm.addVideo(url, meta.title, format, args?.ifBlank { null }, headersWithThumb, size, false) } },
+        onStart = { add { vm.addVideo(url, meta.title, format, args?.ifBlank { null }, headersWithThumb, size, true) } },
     )
 
     if (picking) FormatPicker(

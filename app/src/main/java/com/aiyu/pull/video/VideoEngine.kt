@@ -3,8 +3,10 @@ package com.aiyu.pull.video
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.webkit.CookieManager
 import com.aiyu.pull.data.DownloadDao
 import com.aiyu.pull.data.DownloadEntity
+import com.aiyu.pull.data.SettingsRepository
 import com.aiyu.pull.download.Transfer
 import com.aiyu.pull.engine.DownloadException
 import com.aiyu.pull.engine.ErrorKind
@@ -64,6 +66,7 @@ class VideoEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: DownloadDao,
     private val torrents: TorrentEngine,
+    private val settings: SettingsRepository,
 ) {
     private val initLock = Mutex()
     @Volatile private var ready = false
@@ -78,9 +81,35 @@ class VideoEngine @Inject constructor(
         ready = true
     }
 
-    suspend fun info(url: String): VideoMeta {
+    suspend fun info(url: String, headers: Map<String, String> = emptyMap(), extraArgs: String? = null): VideoMeta {
         ensureReady()
-        val info = withContext(Dispatchers.IO) { YoutubeDL.getInstance().getInfo(url) }
+        return tryInfo(url, headers, extraArgs, retryOnFailure = true)
+    }
+
+    private suspend fun tryInfo(
+        url: String,
+        headers: Map<String, String>,
+        extraArgs: String?,
+        retryOnFailure: Boolean,
+    ): VideoMeta {
+        val request = YoutubeDLRequest(url).apply {
+            headers["User-Agent"]?.let { addOption("--user-agent", it) }
+            headers["Referer"]?.let { addOption("--referer", it) }
+            val cookie = headers["Cookie"] ?: runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull()
+            cookie?.let { addOption("--add-header", "Cookie: $it") }
+            extraArgs?.let { addCommands(splitArgs(it)) }
+        }
+        val info = try {
+            withContext(Dispatchers.IO) { YoutubeDL.getInstance().getInfo(request) }
+        } catch (t: Throwable) {
+            if (retryOnFailure) {
+                val updated = runCatching { checkAndUpdate(force = true) }.getOrNull()
+                if (updated != null) {
+                    return tryInfo(url, headers, extraArgs, retryOnFailure = false)
+                }
+            }
+            throw t
+        }
         val formats = info.formats.orEmpty().mapNotNull { f ->
             val id = f.formatId ?: return@mapNotNull null
             val hasVideo = f.vcodec != null && f.vcodec != "none"
@@ -122,6 +151,18 @@ class VideoEngine @Inject constructor(
             val status = YoutubeDL.getInstance().updateYoutubeDL(context, ch)
             if (status == YoutubeDL.UpdateStatus.DONE) YoutubeDL.getInstance().version(context) else null
         }
+    }
+
+    /** Auto-update yt-dlp if enabled and check interval elapsed, or if forced. Returns new version or null. */
+    suspend fun checkAndUpdate(force: Boolean = false): String? {
+        val s = settings.current()
+        if (!force && !s.ytdlpAutoUpdate) return null
+        val now = System.currentTimeMillis()
+        if (!force && now - s.ytdlpLastCheck < 24 * 3600 * 1000L) return null
+        val channel = runCatching { YtDlpChannel.valueOf(s.ytdlpChannel) }.getOrDefault(YtDlpChannel.STABLE)
+        val res = update(channel)
+        settings.setYtdlpLastCheck(now)
+        return res
     }
 
     fun defaultSaveDir(): File = torrents.defaultSaveDir()
@@ -171,6 +212,8 @@ private class VideoTransfer(
             addOption("--newline")
             e.headers["User-Agent"]?.let { addOption("--user-agent", it) }
             e.headers["Referer"]?.let { addOption("--referer", it) }
+            val cookie = e.headers["Cookie"] ?: runCatching { CookieManager.getInstance().getCookie(e.url) }.getOrNull()
+            cookie?.let { addOption("--add-header", "Cookie: $it") }
             e.extraArgs?.let { addCommands(splitArgs(it)) }
         }
         val response = try {

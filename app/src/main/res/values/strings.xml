@@ -299,6 +299,13 @@
     <string name="channel_master">Master</string>
     <string name="settings_ytdlp_auto">Update automatically</string>
     <string name="settings_ytdlp_auto_hint">Check at most once a day when Pull starts.</string>
+    <string name="ytdlp_version">Version %1$s</string>
+    <string name="ytdlp_update_now">Update yt-dlp now</string>
+    <string name="ytdlp_updating">Updating yt-dlp…</string>
+    <string name="ytdlp_updated">Updated yt-dlp to %1$s</string>
+    <string name="ytdlp_already_latest">yt-dlp is already up to date (%1$s)</string>
+    <string name="ytdlp_update_failed">Failed to update yt-dlp: %1$s</string>
+    <string name="kind_thumbnail">Thumbnail</string>
     <string name="limit_unlimited">Unlimited</string>
     <string name="settings_section_format">Format</string>
     <string name="settings_section_extras">Extras</string>

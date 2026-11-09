@@ -331,7 +331,19 @@ private fun DownloadRow(view: DownloadView, selected: Boolean, onClick: () -> Un
     ) {
         Column(Modifier.padding(horizontal = Dimens.lg, vertical = Dimens.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeIcon(kind.icon, kind.shape, tone.container, tone.onContainer, size = 44.dp, iconSize = 22.dp)
+                val thumbUrl = e.headers["X-Pull-Thumbnail"]
+                if (!thumbUrl.isNullOrBlank()) {
+                    com.aiyu.pull.ui.components.RemoteThumbnail(
+                        url = thumbUrl,
+                        modifier = Modifier.size(44.dp),
+                        shape = MaterialTheme.shapes.small,
+                        placeholder = {
+                            ShapeIcon(kind.icon, kind.shape, tone.container, tone.onContainer, size = 44.dp, iconSize = 22.dp)
+                        }
+                    )
+                } else {
+                    ShapeIcon(kind.icon, kind.shape, tone.container, tone.onContainer, size = 44.dp, iconSize = 22.dp)
+                }
                 Spacer(Modifier.width(Dimens.md))
                 Column(Modifier.weight(1f)) {
                     Text(e.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)

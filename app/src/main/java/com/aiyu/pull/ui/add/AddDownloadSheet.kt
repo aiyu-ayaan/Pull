@@ -177,7 +177,7 @@ fun AddDownloadSheet(
                         is Analysis.Loading -> Busy(stringResource(s.message))
                         is Analysis.Failed -> Problem(s.message)
                         is Analysis.FileLink -> FileBody(s, url.trim(), request, vm, add)
-                        is Analysis.WebPage -> WebPageBody(onFind = { vm.findVideos(url.trim()) })
+                        is Analysis.WebPage -> WebPageBody(onFind = { vm.findVideos(url.trim(), request.headers) })
                         is Analysis.Torrent -> TorrentBody(s, vm, add)
                         is Analysis.Video -> VideoBody(s.meta, url.trim(), request, vm, add)
                     }
@@ -257,10 +257,19 @@ private fun Problem(text: String) {
 }
 
 @Composable
-internal fun Header(icon: @Composable () -> Unit, title: String, lines: List<String>) {
+internal fun Header(icon: @Composable () -> Unit, title: String, lines: List<String>, thumbnailUrl: String? = null) {
     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(Dimens.lg), verticalAlignment = Alignment.CenterVertically) {
-            icon()
+            if (!thumbnailUrl.isNullOrBlank()) {
+                com.aiyu.pull.ui.components.RemoteThumbnail(
+                    url = thumbnailUrl,
+                    modifier = Modifier.size(width = 68.dp, height = 52.dp),
+                    shape = MaterialTheme.shapes.small,
+                    placeholder = icon,
+                )
+            } else {
+                icon()
+            }
             Spacer(Modifier.width(Dimens.md))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)

@@ -77,7 +77,11 @@ import com.aiyu.pull.ui.components.readableGutter
 import com.aiyu.pull.ui.theme.Dimens
 import kotlinx.serialization.Serializable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import kotlinx.coroutines.launch
 import com.aiyu.pull.update.UpdateChannel
 import com.aiyu.pull.ui.update.UpdateStatus
 import com.aiyu.pull.ui.update.UpdateViewModel
@@ -244,6 +248,16 @@ private fun LazyListScope.video(s: Settings, vm: SettingsViewModel) {
         }
     }
     item {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var version by remember { mutableStateOf<String?>(null) }
+        var updating by remember { mutableStateOf(false) }
+        var updateMessage by remember { mutableStateOf<String?>(null) }
+
+        LaunchedEffect(Unit) {
+            version = vm.ytdlpVersion()
+        }
+
         Section(R.string.settings_section_ytdlp) {
             ChoiceItem(
                 R.string.settings_ytdlp_channel,
@@ -251,6 +265,25 @@ private fun LazyListScope.video(s: Settings, vm: SettingsViewModel) {
                 selected = s.ytdlpChannel,
             ) { ch -> vm.update { setYtdlpChannel(ch) } }
             SwitchItem(R.string.settings_ytdlp_auto, R.string.settings_ytdlp_auto_hint, s.ytdlpAutoUpdate) { on -> vm.update { setYtdlpAutoUpdate(on) } }
+            ActionItem(
+                title = if (updating) stringResource(R.string.ytdlp_updating) else stringResource(R.string.ytdlp_update_now),
+                hint = updateMessage ?: version?.let { stringResource(R.string.ytdlp_version, it) },
+                enabled = !updating,
+            ) {
+                scope.launch {
+                    updating = true
+                    updateMessage = null
+                    try {
+                        val newVer = vm.updateYtdlp()
+                        version = vm.ytdlpVersion()
+                        updateMessage = if (newVer != null) context.getString(R.string.ytdlp_updated, newVer) else context.getString(R.string.ytdlp_already_latest, version ?: "")
+                    } catch (e: Exception) {
+                        updateMessage = context.getString(R.string.ytdlp_update_failed, e.message ?: "")
+                    } finally {
+                        updating = false
+                    }
+                }
+            }
         }
     }
 }
@@ -379,6 +412,16 @@ internal fun Section(title: Int, content: @Composable () -> Unit) {
         )
         Group(content)
     }
+}
+
+@Composable
+private fun ActionItem(title: String, hint: String?, enabled: Boolean = true, onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = hint?.let { { Text(it) } },
+        colors = itemColors(),
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
+    )
 }
 
 @Composable

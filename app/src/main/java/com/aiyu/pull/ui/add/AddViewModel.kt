@@ -70,7 +70,7 @@ class AddViewModel @Inject constructor(
                     torrentFile != null -> Analysis.Torrent(torrents.get().parse(File(torrentFile).readBytes()), null, false)
                     input.startsWith("magnet:", ignoreCase = true) -> fetchMagnet(input)
                     !input.startsWith("http://") && !input.startsWith("https://") -> Analysis.Idle
-                    VideoEngine.isVideoSite(input) -> { _state.value = Analysis.Loading(R.string.analyze_video); Analysis.Video(videos.get().info(input)) }
+                    VideoEngine.isVideoSite(input) -> { _state.value = Analysis.Loading(R.string.analyze_video); Analysis.Video(videos.get().info(input, headers)) }
                     else -> {
                         _state.value = Analysis.Loading(R.string.probe_loading)
                         val info = manager.probe(input, headers)
@@ -94,12 +94,12 @@ class AddViewModel @Inject constructor(
     }
 
     /** The page was HTML: let yt-dlp look for a video on it. */
-    fun findVideos(url: String) {
+    fun findVideos(url: String, headers: Map<String, String> = emptyMap()) {
         job?.cancel()
         job = viewModelScope.launch {
             _state.value = Analysis.Loading(R.string.analyze_video)
             _state.value = try {
-                Analysis.Video(videos.get().info(url))
+                Analysis.Video(videos.get().info(url, headers))
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Throwable) {
