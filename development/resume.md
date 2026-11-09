@@ -38,3 +38,14 @@ In progress:
 - Torrent downloads run from the web seed; the final file hash is not checked yet.
 - Video downloads (yt-dlp) are wired but have never been run.
 - The details screen is not torrent- or video-aware yet.
+
+## Task list at handoff
+
+- [x] **Torrent: engine, DB migration, task abstraction.** Covers the libtorrent4j session, Room v2 (`kind`, torrent and video columns), the `Transfer` abstraction in `DownloadManager`, web seeds read from `url-list`, and the web-seed test on the emulator.
+- [ ] **Torrent: add popup, intents, details, settings.**
+  - Done: magnet and `.torrent` VIEW intents, drawer "Open torrent file", torrent mode in the add popup, `TorrentFilesSheet` (folder tree, type chips, select all), live reselection plumbing (`setTorrentFiles`).
+  - Left: torrent details UI (next step 2), torrent settings (next step 5), magnet test.
+- [ ] **Video: yt-dlp via youtubedl-android.**
+  - Done: `VideoEngine` / `VideoTransfer`, video mode in the add popup (Best quality default, per-resolution, audio only, custom command chips), web page → "Find videos".
+  - Left: Seal-like yt-dlp Update page (next step 3), Command templates screen (next step 4), video details, emulator test with a real video (next step 6), GPL-3.0 LICENSE.
+- [ ] **Docs: tTorrent teardown, TODO, CLAUDE.md update, commits.** `development/docs/09-ttorrent-teardown.md`, TODO.md checkboxes, CLAUDE.md notes (modules, GPL, `pull.buildRoot`), release ABI splits (next step 7).
