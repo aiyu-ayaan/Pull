@@ -7,3 +7,6 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 -keep @kotlinx.serialization.Serializable class com.aiyu.pull.ui.navigation.** { *; }
+# Route arguments (SettingsPage) and Json-saved state (AddRequest, CommandTemplate) are looked up by serial name.
+-keep @kotlinx.serialization.Serializable class com.aiyu.pull.** { *; }
+-keepnames enum com.aiyu.pull.** { *; }
