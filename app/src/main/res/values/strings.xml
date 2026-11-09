@@ -35,6 +35,8 @@
     <string name="browser_app_name">Pull Browser</string>
     <string name="browser_link_updated">New link found. Resuming the download.</string>
     <string name="browser_added">Added to Pull</string>
+    <string name="browser_address_hint">Search or type URL</string>
+    <string name="action_clear">Clear</string>
     <string name="empty_done_title">No finished downloads yet</string>
     <string name="day_today">Today</string>
     <string name="day_yesterday">Yesterday</string>

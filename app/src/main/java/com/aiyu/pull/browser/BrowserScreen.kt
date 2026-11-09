@@ -60,9 +60,23 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aiyu.pull.R
 import com.aiyu.pull.ui.add.AddRequest
 import com.aiyu.pull.ui.theme.Dimens
-import java.net.URLEncoder
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import com.aiyu.pull.ui.components.MorphingShape
+import com.aiyu.pull.ui.components.heroBrush
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-private const val HOME = "https://duckduckgo.com/"
+private const val SEARCH_ENGINE = "https://duckduckgo.com/?q="
 
 /**
  * Minimal WebView browser that hands downloads to Pull with the page's cookies, user agent and referer.
@@ -82,9 +96,19 @@ fun BrowserScreen(
 ) {
     val context = LocalContext.current
     val focus = LocalFocusManager.current
+    val scope = rememberCoroutineScope()
     // Saveable: after process death the page comes back (not its scroll or form state).
-    var current by rememberSaveable { mutableStateOf(startUrl ?: HOME) }
+    var current by rememberSaveable { mutableStateOf(startUrl.orEmpty()) }
     var address by rememberSaveable { mutableStateOf(current) }
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(address)) }
+    var isFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(address) {
+        if (address != textFieldValue.text) {
+            textFieldValue = TextFieldValue(address)
+        }
+    }
+
     var progress by remember { mutableIntStateOf(100) }
     var canBack by remember { mutableStateOf(false) }
     var canForward by remember { mutableStateOf(false) }
@@ -111,18 +135,27 @@ fun BrowserScreen(
             settings.displayZoomControls = false
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                    current = url; address = url
+                    if (url != "about:blank") {
+                        current = url
+                        address = url
+                    }
                 }
                 override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
-                    canBack = view.canGoBack(); canForward = view.canGoForward()
-                    current = url; address = url
+                    canBack = view.canGoBack()
+                    canForward = view.canGoForward()
+                    if (url != "about:blank") {
+                        current = url
+                        address = url
+                    }
                 }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) { progress = newProgress }
             }
             setDownloadListener { url, ua, disposition, mime, _ -> onCatch(url, ua, disposition, mime, this.url) }
-            loadUrl(current)
+            if (current.isNotBlank()) {
+                loadUrl(current)
+            }
         }
     }
     DisposableEffect(webView) { onDispose { webView.stopLoading(); webView.destroy() } }
@@ -137,10 +170,24 @@ fun BrowserScreen(
                         Icon(Icons.Rounded.Close, stringResource(R.string.action_close))
                     }
                     TextField(
-                        value = address,
-                        onValueChange = { address = it },
+                        value = textFieldValue,
+                        onValueChange = {
+                            textFieldValue = it
+                            address = it.text
+                        },
                         singleLine = true,
-                        leadingIcon = { Icon(if (address.startsWith("https://")) Icons.Rounded.Lock else Icons.Rounded.Search, null) },
+                        placeholder = { Text(stringResource(R.string.browser_address_hint)) },
+                        leadingIcon = { Icon(if (textFieldValue.text.startsWith("https://")) Icons.Rounded.Lock else Icons.Rounded.Search, null) },
+                        trailingIcon = {
+                            if (textFieldValue.text.isNotEmpty()) {
+                                IconButton(onClick = {
+                                    textFieldValue = TextFieldValue("")
+                                    address = ""
+                                }) {
+                                    Icon(Icons.Rounded.Close, stringResource(R.string.action_clear))
+                                }
+                            }
+                        },
                         shape = CircleShape,
                         colors = TextFieldDefaults.colors(
                             focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -149,12 +196,33 @@ fun BrowserScreen(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = {
                             focus.clearFocus()
-                            webView.loadUrl(toUrl(address))
+                            val targetUrl = toUrl(textFieldValue.text)
+                            if (targetUrl.isNotBlank()) {
+                                current = targetUrl
+                                webView.loadUrl(targetUrl)
+                            }
                         }),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { state ->
+                                if (state.isFocused && !isFocused) {
+                                    if (textFieldValue.text.isNotEmpty()) {
+                                        textFieldValue = textFieldValue.copy(
+                                            selection = TextRange(0, textFieldValue.text.length)
+                                        )
+                                        scope.launch {
+                                            delay(50)
+                                            textFieldValue = textFieldValue.copy(
+                                                selection = TextRange(0, textFieldValue.text.length)
+                                            )
+                                        }
+                                    }
+                                }
+                                isFocused = state.isFocused
+                            },
                     )
                 }
-                if (progress in 0..99) LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                if (progress in 0..99 && current.isNotBlank()) LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
                 AnimatedVisibility(refreshId >= 0) {
                     Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
                         Text(
@@ -174,21 +242,53 @@ fun BrowserScreen(
                     IconButton(onClick = { webView.goForward() }, enabled = canForward) { Icon(Icons.AutoMirrored.Rounded.ArrowForward, stringResource(R.string.cd_forward)) }
                     IconButton(onClick = { webView.reload() }) { Icon(Icons.Rounded.Refresh, stringResource(R.string.cd_reload)) }
                     Spacer(Modifier.width(Dimens.sm))
-                    IconButton(onClick = { webView.loadUrl(HOME) }) { Icon(Icons.Rounded.Home, stringResource(R.string.cd_home)) }
+                    IconButton(onClick = {
+                        webView.loadUrl("about:blank")
+                        current = ""
+                        address = ""
+                        textFieldValue = TextFieldValue("")
+                    }) { Icon(Icons.Rounded.Home, stringResource(R.string.cd_home)) }
                 },
             )
         },
     ) { padding ->
-        AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize().padding(padding))
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
+            if (current.isBlank()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(Dimens.xxl),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    MorphingShape(brush = heroBrush(), modifier = Modifier.size(96.dp))
+                    Spacer(Modifier.height(Dimens.xl))
+                    Text(
+                        stringResource(R.string.browser_app_name),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(Dimens.sm))
+                    Text(
+                        stringResource(R.string.browser_address_hint),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 
 /** Address bar text to a URL: anything that looks like a host loads, the rest is a search. */
 private fun toUrl(text: String): String {
     val t = text.trim()
+    if (t.isEmpty()) return ""
     return when {
         t.startsWith("http://") || t.startsWith("https://") -> t
         !t.contains(' ') && t.contains('.') -> "https://$t"
-        else -> "https://duckduckgo.com/?q=" + URLEncoder.encode(t, "UTF-8")
+        else -> SEARCH_ENGINE + java.net.URLEncoder.encode(t, "UTF-8")
     }
 }
