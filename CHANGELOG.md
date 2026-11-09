@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1-alpha.3](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.2...v0.1.1-alpha.3) (2026-11-09)
+
+### Other changes
+
+* Fix yt-dlp and torrents in release builds (R8 keep rules)
+
 ## [0.1.1-alpha.2](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.1...v0.1.1-alpha.2) (2026-11-09)
 
 ### Other changes
