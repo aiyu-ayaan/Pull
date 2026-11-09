@@ -49,7 +49,7 @@ class FileStore @Inject constructor(@ApplicationContext private val context: Con
         }
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: throw IOException("Storage unavailable")
         dir.mkdirs()
-        val file = unique(dir, fileName)
+        val file = uniqueFile(dir, fileName)
         file.createNewFile()
         return Uri.fromFile(file) to file.name
     }
@@ -108,15 +108,6 @@ class FileStore @Inject constructor(@ApplicationContext private val context: Con
 
     fun parse(uri: String): Uri = uri.toUri()
 
-    private fun unique(dir: File, name: String): File {
-        var file = File(dir, name)
-        val base = name.substringBeforeLast('.', name)
-        val ext = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
-        var n = 1
-        while (file.exists()) file = File(dir, "$base (${n++})$ext")
-        return file
-    }
-
     companion object {
         fun mimeFor(fileName: String, serverMime: String?): String {
             val ext = fileName.substringAfterLast('.', "").lowercase()
@@ -125,4 +116,14 @@ class FileStore @Inject constructor(@ApplicationContext private val context: Con
                 ?: "application/octet-stream"
         }
     }
+}
+
+/** [name] in [dir], or `name (1).ext`, `name (2).ext`… when taken, like Android and Windows do. */
+fun uniqueFile(dir: File, name: String): File {
+    var file = File(dir, name)
+    val base = name.substringBeforeLast('.', name)
+    val ext = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+    var n = 1
+    while (file.exists()) file = File(dir, "$base (${n++})$ext")
+    return file
 }

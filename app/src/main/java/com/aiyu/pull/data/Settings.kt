@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.aiyu.pull.video.AudioFormat
+import com.aiyu.pull.video.Container
+import com.aiyu.pull.video.VideoChoice
+import com.aiyu.pull.video.VideoCodec
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
@@ -39,6 +43,8 @@ data class Settings(
     val torrentDownLimit: Int = 0,
     val torrentUpLimit: Int = 0,
     val torrentConnections: Int = 200,
+    /** Defaults for new video downloads; the sheet can change them per download. */
+    val video: VideoChoice = VideoChoice(),
 )
 
 /** BitTorrent protocol encryption: allow both, require it, or never use it. */
@@ -49,6 +55,8 @@ enum class Encryption { ENABLED, FORCED, DISABLED }
 data class CommandTemplate(val id: Long, val name: String, val args: String)
 
 private val Context.store by preferencesDataStore("settings")
+
+private inline fun <reified E : Enum<E>> String?.enumOr(default: E): E = this?.let { runCatching { enumValueOf<E>(it) }.getOrNull() } ?: default
 
 @Singleton
 class SettingsRepository @Inject constructor(@ApplicationContext private val context: Context) {
@@ -71,6 +79,15 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val torrentDownLimit = intPreferencesKey("torrent_down_limit")
         val torrentUpLimit = intPreferencesKey("torrent_up_limit")
         val torrentConnections = intPreferencesKey("torrent_connections")
+        val videoMaxRes = intPreferencesKey("video_max_res")
+        val videoCodec = stringPreferencesKey("video_codec")
+        val videoContainer = stringPreferencesKey("video_container")
+        val audioFormat = stringPreferencesKey("audio_format")
+        val videoSubtitles = booleanPreferencesKey("video_subtitles")
+        val subtitleLangs = stringPreferencesKey("subtitle_langs")
+        val videoThumbnail = booleanPreferencesKey("video_thumbnail")
+        val videoMetadata = booleanPreferencesKey("video_metadata")
+        val sponsorBlock = booleanPreferencesKey("sponsor_block")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -92,6 +109,17 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             torrentDownLimit = p[Keys.torrentDownLimit] ?: 0,
             torrentUpLimit = p[Keys.torrentUpLimit] ?: 0,
             torrentConnections = p[Keys.torrentConnections] ?: 200,
+            video = VideoChoice(
+                maxRes = p[Keys.videoMaxRes] ?: 0,
+                codec = p[Keys.videoCodec].enumOr(VideoCodec.ANY),
+                container = p[Keys.videoContainer].enumOr(Container.AUTO),
+                audio = p[Keys.audioFormat].enumOr(AudioFormat.BEST),
+                subtitles = p[Keys.videoSubtitles] ?: false,
+                subtitleLangs = p[Keys.subtitleLangs] ?: "en.*",
+                thumbnail = p[Keys.videoThumbnail] ?: false,
+                metadata = p[Keys.videoMetadata] ?: true,
+                sponsorBlock = p[Keys.sponsorBlock] ?: false,
+            ),
         )
     }
 
@@ -121,6 +149,15 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setTorrentEncryption(e: Encryption) = set(Keys.torrentEncryption, e.name)
     suspend fun setTorrentDownLimit(kb: Int) = set(Keys.torrentDownLimit, kb.coerceAtLeast(0))
     suspend fun setTorrentUpLimit(kb: Int) = set(Keys.torrentUpLimit, kb.coerceAtLeast(0))
+    suspend fun setVideoMaxRes(res: Int) = set(Keys.videoMaxRes, res.coerceAtLeast(0))
+    suspend fun setVideoCodec(c: VideoCodec) = set(Keys.videoCodec, c.name)
+    suspend fun setVideoContainer(c: Container) = set(Keys.videoContainer, c.name)
+    suspend fun setAudioFormat(f: AudioFormat) = set(Keys.audioFormat, f.name)
+    suspend fun setVideoSubtitles(on: Boolean) = set(Keys.videoSubtitles, on)
+    suspend fun setSubtitleLangs(langs: String) = set(Keys.subtitleLangs, langs.trim().ifEmpty { "en.*" })
+    suspend fun setVideoThumbnail(on: Boolean) = set(Keys.videoThumbnail, on)
+    suspend fun setVideoMetadata(on: Boolean) = set(Keys.videoMetadata, on)
+    suspend fun setSponsorBlock(on: Boolean) = set(Keys.sponsorBlock, on)
     suspend fun setTorrentConnections(n: Int) = set(Keys.torrentConnections, n.coerceIn(20, 500))
 
     companion object {

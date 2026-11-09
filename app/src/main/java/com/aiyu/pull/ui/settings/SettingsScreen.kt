@@ -68,6 +68,9 @@ import com.aiyu.pull.R
 import com.aiyu.pull.data.Encryption
 import com.aiyu.pull.data.Settings
 import com.aiyu.pull.data.ThemeMode
+import com.aiyu.pull.video.AudioFormat
+import com.aiyu.pull.video.Container
+import com.aiyu.pull.video.VideoCodec
 import com.aiyu.pull.ui.components.ShapeIcon
 import com.aiyu.pull.ui.components.readableGutter
 import com.aiyu.pull.ui.theme.Dimens
@@ -201,6 +204,45 @@ private fun LazyListScope.torrents(s: Settings, vm: SettingsViewModel) {
 }
 
 private fun LazyListScope.video(s: Settings, vm: SettingsViewModel) {
+    val v = s.video
+    item {
+        Section(R.string.settings_section_format) {
+            ChoiceItem(
+                R.string.settings_video_quality,
+                options = listOf(0 to R.string.quality_best, 2160 to R.string.res_2160, 1440 to R.string.res_1440, 1080 to R.string.res_1080,
+                    720 to R.string.res_720, 480 to R.string.res_480, 360 to R.string.res_360),
+                selected = v.maxRes,
+            ) { r -> vm.update { setVideoMaxRes(r) } }
+            ChoiceItem(
+                R.string.settings_video_codec,
+                options = listOf(VideoCodec.ANY to R.string.codec_any, VideoCodec.AV1 to R.string.codec_av1, VideoCodec.VP9 to R.string.codec_vp9, VideoCodec.AVC to R.string.codec_avc),
+                selected = v.codec,
+            ) { c -> vm.update { setVideoCodec(c) } }
+            ChoiceItem(
+                R.string.settings_video_container,
+                options = listOf(Container.AUTO to R.string.container_auto, Container.MP4 to R.string.container_mp4, Container.MKV to R.string.container_mkv),
+                selected = v.container,
+            ) { c -> vm.update { setVideoContainer(c) } }
+            ChoiceItem(
+                R.string.settings_audio_format,
+                options = listOf(AudioFormat.BEST to R.string.audio_best, AudioFormat.M4A to R.string.audio_m4a, AudioFormat.MP3 to R.string.audio_mp3, AudioFormat.OPUS to R.string.audio_opus),
+                selected = v.audio,
+            ) { f -> vm.update { setAudioFormat(f) } }
+        }
+    }
+    item {
+        Section(R.string.settings_section_extras) {
+            SwitchItem(R.string.opt_subtitles, R.string.opt_subtitles_hint, v.subtitles) { on -> vm.update { setVideoSubtitles(on) } }
+            ChoiceItem(
+                R.string.settings_subtitle_langs,
+                options = listOf("en.*" to R.string.subs_english, "all,-live_chat" to R.string.subs_all),
+                selected = v.subtitleLangs,
+            ) { l -> vm.update { setSubtitleLangs(l) } }
+            SwitchItem(R.string.opt_thumbnail, R.string.opt_thumbnail_hint, v.thumbnail) { on -> vm.update { setVideoThumbnail(on) } }
+            SwitchItem(R.string.opt_metadata, R.string.opt_metadata_hint, v.metadata) { on -> vm.update { setVideoMetadata(on) } }
+            SwitchItem(R.string.opt_sponsorblock, R.string.opt_sponsorblock_hint, v.sponsorBlock) { on -> vm.update { setSponsorBlock(on) } }
+        }
+    }
     item {
         Section(R.string.settings_section_ytdlp) {
             ChoiceItem(

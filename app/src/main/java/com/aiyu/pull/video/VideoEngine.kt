@@ -38,7 +38,17 @@ data class VideoFormat(
     val hasVideo: Boolean,
     val hasAudio: Boolean,
     val sizeBytes: Long,
-)
+    val width: Int = 0,
+    val fps: Int = 0,
+    val vcodec: String = "",
+    val acodec: String = "",
+    /** Total and audio bitrate in kbit/s; 0 when unknown. */
+    val tbr: Int = 0,
+    val abr: Int = 0,
+) {
+    /** Shorter side, so a vertical 1080x1920 video counts as 1080p like a landscape one. */
+    val res: Int get() = if (width > 0 && height > 0) minOf(width, height) else height
+}
 
 data class VideoMeta(val title: String, val durationSeconds: Int, val thumbnail: String?, val formats: List<VideoFormat>)
 
@@ -84,6 +94,12 @@ class VideoEngine @Inject constructor(
                 hasVideo = hasVideo,
                 hasAudio = hasAudio,
                 sizeBytes = if (f.fileSize > 0) f.fileSize else f.fileSizeApproximate,
+                width = f.width,
+                fps = f.fps,
+                vcodec = f.vcodec?.takeIf { hasVideo }.orEmpty(),
+                acodec = f.acodec?.takeIf { hasAudio }.orEmpty(),
+                tbr = f.tbr,
+                abr = f.abr,
             )
         }
         return VideoMeta(info.title ?: url, info.duration, info.thumbnail, formats)
@@ -173,7 +189,7 @@ private class VideoTransfer(
         if (response.exitCode != 0) throw DownloadException(ErrorKind.HTTP, response.err.lines().lastOrNull { it.isNotBlank() } ?: "yt-dlp failed")
         val out = dir.listFiles { f -> f.name.contains(tag) && !f.name.endsWith(".part") && !f.name.endsWith(".ytdl") }
             ?.maxByOrNull { it.lastModified() } ?: throw IOException("yt-dlp finished but the file is missing")
-        val clean = File(dir, out.name.replace(" $tag", "")).let { if (it.exists()) out else it.also { t -> out.renameTo(t) } }
+        val clean = com.aiyu.pull.download.uniqueFile(dir, out.name.replace(" $tag", "")).let { if (out.renameTo(it)) it else out }
         dao.setFile(e.id, Uri.fromFile(clean).toString(), clean.name, null)
         val size = clean.length()
         _progress.value = Progress(_progress.value.info?.copy(totalBytes = size), size, 0, emptyList())

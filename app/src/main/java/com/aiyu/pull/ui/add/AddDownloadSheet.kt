@@ -191,7 +191,7 @@ private fun Problem(text: String) {
 }
 
 @Composable
-private fun Header(icon: @Composable () -> Unit, title: String, lines: List<String>) {
+internal fun Header(icon: @Composable () -> Unit, title: String, lines: List<String>) {
     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(Dimens.lg), verticalAlignment = Alignment.CenterVertically) {
             icon()
@@ -205,7 +205,7 @@ private fun Header(icon: @Composable () -> Unit, title: String, lines: List<Stri
 }
 
 @Composable
-private fun Actions(onLater: () -> Unit, onStart: () -> Unit, enabled: Boolean = true) {
+internal fun Actions(onLater: () -> Unit, onStart: () -> Unit, enabled: Boolean = true) {
     Row(horizontalArrangement = Arrangement.spacedBy(Dimens.sm), modifier = Modifier.fillMaxWidth()) {
         FilledTonalButton(onClick = onLater, enabled = enabled, shapes = ButtonDefaults.shapes(), modifier = Modifier.weight(1f).heightIn(min = 56.dp)) {
             Icon(Icons.Rounded.Schedule, null, Modifier.size(ButtonDefaults.IconSize)); Spacer(Modifier.width(Dimens.sm))
@@ -327,59 +327,4 @@ private fun ColumnScope.TorrentBody(s: Analysis.Torrent, vm: AddViewModel, add: 
     )
 }
 
-/** Quality choices offered for a video. [format] is the yt-dlp selector. */
-private data class Quality(val key: String, val label: String, val format: String, val size: Long)
-
-@Composable
-private fun ColumnScope.VideoBody(meta: VideoMeta, url: String, request: AddRequest, vm: AddViewModel, add: (suspend () -> Long) -> Unit) {
-    val bestAudio = meta.formats.filter { it.hasAudio && !it.hasVideo }.maxByOrNull { it.sizeBytes }?.sizeBytes ?: 0
-    val heights = meta.formats.filter { it.hasVideo && it.height > 0 }.groupBy { it.height }.toSortedMap(compareByDescending { it })
-    val best = stringResource(R.string.quality_best)
-    val audio = stringResource(R.string.quality_audio)
-    val choices = buildList {
-        add(Quality("best", best, VideoEngine.BEST, (heights.values.firstOrNull()?.maxOf { it.sizeBytes } ?: 0) + bestAudio))
-        heights.forEach { (h, list) ->
-            add(Quality("h$h", "${h}p", "bv*[height<=$h]+ba/b[height<=$h]", list.maxOf { it.sizeBytes } + bestAudio))
-        }
-        add(Quality("audio", audio, VideoEngine.AUDIO_ONLY, bestAudio))
-    }
-    var choice by rememberSaveable { mutableStateOf("best") }
-    val templates by vm.templates.collectAsStateWithLifecycle()
-    var template by rememberSaveable { mutableStateOf<Long?>(null) }
-    val picked = choices.firstOrNull { it.key == choice } ?: choices.first()
-    Header(
-        icon = { ShapeIcon(Icons.Rounded.Movie, MaterialShapes.Cookie9Sided, FileKind.VIDEO.tone.container, FileKind.VIDEO.tone.onContainer, size = 40.dp, iconSize = 20.dp) },
-        title = meta.title,
-        lines = listOfNotNull(
-            meta.durationSeconds.takeIf { it > 0 }?.let { formatDuration(it.toLong()) },
-            picked.size.takeIf { it > 0 }?.let { stringResource(R.string.quality_size, formatBytes(it)) },
-        ),
-    )
-    Text(stringResource(R.string.quality_title), style = MaterialTheme.typography.titleSmall)
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Dimens.sm)) {
-        choices.forEach { q ->
-            FilterChip(
-                selected = q.key == choice,
-                onClick = { choice = q.key },
-                label = { Text(q.label) },
-                leadingIcon = if (q.key == "best") ({ Icon(Icons.Rounded.CheckCircle, null, Modifier.size(18.dp)) }) else null,
-            )
-        }
-    }
-    if (choice == "best") {
-        Text(stringResource(R.string.quality_best_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    if (templates.isNotEmpty()) {
-        Text(stringResource(R.string.command_template), style = MaterialTheme.typography.titleSmall)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Dimens.sm)) {
-            FilterChip(selected = template == null, onClick = { template = null }, label = { Text(stringResource(R.string.command_none)) })
-            templates.forEach { t -> FilterChip(selected = template == t.id, onClick = { template = t.id }, label = { Text(t.name) }) }
-        }
-    }
-    val args = templates.firstOrNull { it.id == template }?.args
-    Actions(
-        onLater = { add { vm.addVideo(url, meta.title, picked.format, args, request.headers, picked.size, false) } },
-        onStart = { add { vm.addVideo(url, meta.title, picked.format, args, request.headers, picked.size, true) } },
-    )
-}
 

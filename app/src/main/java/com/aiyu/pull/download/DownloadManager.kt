@@ -218,7 +218,7 @@ class DownloadManager @Inject constructor(
                     addTorrent(null, input, emptySet(), s.torrentSequential, true)
                     QuickResult.TORRENT to null
                 }
-                com.aiyu.pull.video.VideoEngine.isVideoSite(input) -> quickVideo(input)
+                com.aiyu.pull.video.VideoEngine.isVideoSite(input) -> quickVideo(input, s.video)
                 else -> {
                     val info = probe(input)
                     when {
@@ -230,7 +230,8 @@ class DownloadManager @Inject constructor(
                         // A page, not a file: yt-dlp may still find a video on it.
                         info.mimeType == "text/html" -> runCatching {
                             val meta = videos.get().info(input)
-                            addVideo(input, meta.title, com.aiyu.pull.video.VideoEngine.BEST, null)
+                            val (format, args) = com.aiyu.pull.video.VideoOptions.build(s.video)
+                            addVideo(input, meta.title, format, args)
                             QuickResult.VIDEO to meta.title
                         }.getOrElse { QuickResult.NOTHING to null }
                         else -> {
@@ -250,8 +251,9 @@ class DownloadManager @Inject constructor(
     }
 
     /** Starts at once under a placeholder name; the real title replaces it when yt-dlp has read the page. */
-    private suspend fun quickVideo(url: String): Pair<QuickResult, String?> {
-        val id = addVideo(url, runCatching { java.net.URI(url).host }.getOrNull() ?: url, com.aiyu.pull.video.VideoEngine.BEST, null)
+    private suspend fun quickVideo(url: String, prefs: com.aiyu.pull.video.VideoChoice): Pair<QuickResult, String?> {
+        val (format, args) = com.aiyu.pull.video.VideoOptions.build(prefs)
+        val id = addVideo(url, runCatching { java.net.URI(url).host }.getOrNull() ?: url, format, args)
         scope.launch { runCatching { videos.get().info(url).title }.onSuccess { dao.setName(id, it) } }
         return QuickResult.VIDEO to null
     }

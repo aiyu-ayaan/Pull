@@ -53,6 +53,8 @@ class AddViewModel @Inject constructor(
     val state: StateFlow<Analysis> = _state.asStateFlow()
     val connections: StateFlow<Int> = settings.settings.map { it.connections }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     val templates: StateFlow<List<CommandTemplate>> = settings.templates.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val videoDefaults: StateFlow<com.aiyu.pull.video.VideoChoice> =
+        settings.settings.map { it.video }.stateIn(viewModelScope, SharingStarted.Eagerly, com.aiyu.pull.video.VideoChoice())
     val sequentialDefault: StateFlow<Boolean> = settings.settings.map { it.torrentSequential }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private var job: Job? = null
     private var analyzed: String? = null
