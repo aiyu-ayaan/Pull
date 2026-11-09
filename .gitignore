@@ -1,3 +1,29 @@
 fdm_armv8.apk
 *.apk
+*.aab
 .codegraph/
+
+# Android / Gradle
+*.iml
+.gradle
+.kotlin/
+/build
+/*/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.idea/
+*.hprof
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Release signing
+keystore.properties
+*.jks
+*.keystore
+
+# Python
+__pycache__/

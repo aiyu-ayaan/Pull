@@ -1,0 +1,393 @@
+package com.aiyu.pull.engine
+
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.random.Random
+
+/**
+ * One download: probe, split, work-steal, retry, resume. See development/docs/03-download-engine.md.
+ *
+ * [run] returns when every byte is on disk and throws [DownloadException] on a fatal error. Pause = cancel the
+ * coroutine running [run], then save [snapshot]; a later task built with that [ResumeData] continues from it.
+ *
+ * [openFile] gets the server's answer before the first byte is written, so the caller can name the file.
+ */
+class DownloadTask(
+    private val client: OkHttpClient,
+    private val request: DownloadRequest,
+    private val openFile: suspend (RemoteInfo) -> FileChannel,
+    private val awaitNetwork: suspend () -> Unit = {},
+    private val maxRetries: Int = 10,
+    private val retryBaseMillis: Long = 1_000,
+    private val bufferBytes: Int = 256 * 1024,
+) {
+    private class Segment(val start: Long, end: Long, current: Long) {
+        val end = AtomicLong(end)
+        val current = AtomicLong(current)
+        @Volatile var active = false
+        @Volatile var retries = 0
+        var sampledAt = current
+        var speed = 0.0
+        val remaining: Long
+            get() {
+                val e = end.get()
+                return if (e == Long.MAX_VALUE) Long.MAX_VALUE else (e - current.get() + 1).coerceAtLeast(0)
+            }
+    }
+
+    private val segments = CopyOnWriteArrayList<Segment>()
+    private val queue = ArrayDeque<Segment>()
+    private val lock = Any()
+    private val refreshLock = Mutex()
+    private val liveCalls = ConcurrentHashMap.newKeySet<Call>()
+    @Volatile private var cancelled = false
+    @Volatile private var info: RemoteInfo? = request.resume?.info
+    private lateinit var channel: FileChannel
+    private var totalSpeed = 0.0
+    private var lastDownloaded = -1L
+
+    init {
+        request.resume?.takeIf { it.info.acceptRanges && it.info.totalBytes > 0 }?.segments?.filter { !it.done }?.forEach { s ->
+            val seg = Segment(s.start, s.end, s.current)
+            segments += seg
+            queue += seg
+        }
+    }
+
+    private val _progress = MutableStateFlow(Progress(info, downloaded(), 0, emptyList()))
+
+    /** Sampled every 250 ms while [run] is active. */
+    val progress: StateFlow<Progress> = _progress.asStateFlow()
+
+    /** Unfinished ranges plus what the server said; null before the probe answered. Safe to call any time. */
+    fun snapshot(): ResumeData? {
+        val i = info ?: return null
+        val open = segments.map { SegmentState(it.start, it.end.get(), it.current.get()) }.filter { !it.done }
+        return ResumeData(i, open.sortedBy { it.start })
+    }
+
+    suspend fun run(): RemoteInfo = withContext(Dispatchers.IO) {
+        coroutineScope {
+            // Blocking socket reads ignore coroutine cancellation; cancelling the calls unblocks them at once on pause.
+            launch {
+                try { awaitCancellation() } finally { cancelled = true; liveCalls.forEach(Call::cancel) }
+            }
+            val sampler = launch { while (true) { delay(250); sample() } }
+            try {
+                val resume = request.resume
+                if (resume != null && resume.info.acceptRanges && resume.info.totalBytes > 0) resumeFrom(resume) else fresh()
+                val i = info!!
+                if (i.totalBytes >= 0 && segments.any { it.remaining > 0 }) {
+                    throw DownloadException(ErrorKind.NETWORK, "Download stopped before the end")
+                }
+                try { channel.force(false) } catch (e: IOException) { throw DownloadException(ErrorKind.DISK, e.message ?: "fsync failed", cause = e) }
+                sample()
+                i
+            } finally {
+                sampler.cancel()
+                coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
+            }
+        }
+    }
+
+    private suspend fun CoroutineScope.resumeFrom(resume: ResumeData) {
+        channel = openChannel(resume.info)
+        sample()
+        startWorkers(first = null)
+    }
+
+    private suspend fun CoroutineScope.fresh() {
+        val first = retrying {
+            execute(rangeRequest(request.url, request.headers, 0, null)).also {
+                if (it.code == 429 || it.code >= 500) { it.close(); throw IOException("HTTP ${it.code}") }
+            }
+        }
+        try {
+            when {
+                first.code == 200 || first.code == 206 -> Unit
+                first.code.isExpiredLinkCode() -> throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired (HTTP ${first.code})", first.code)
+                else -> throw DownloadException(ErrorKind.HTTP, "HTTP ${first.code}", first.code)
+            }
+            var i = first.remoteInfo()
+            // 200 with a length: ranges unknown. One extra ranged request tells; the first stream keeps going meanwhile.
+            if (first.code == 200 && i.totalBytes > 2 * request.minSplitBytes) {
+                val mid = i.totalBytes / 2
+                val check = runCatching { execute(rangeRequest(i.finalUrl, request.headers, mid, null)) }.getOrNull()
+                check?.use {
+                    val range = parseContentRange(it.header("Content-Range"))
+                    if (it.code == 206 && range?.first == mid && range.third == i.totalBytes) i = i.copy(acceptRanges = true)
+                }
+            }
+            channel = openChannel(i)
+            val total = i.totalBytes
+            val seg0 = Segment(0, if (total >= 0) total - 1 else Long.MAX_VALUE, 0)
+            synchronized(lock) {
+                segments += seg0
+                if (i.acceptRanges && total > 0) {
+                    // Immediate ramp-up: all parts start now instead of one more per round trip.
+                    val n = (total / request.minSplitBytes).coerceIn(1, request.maxConnections.toLong()).toInt()
+                    val part = total / n
+                    seg0.end.set(part - 1)
+                    for (k in 1 until n) {
+                        val s = Segment(k * part, if (k == n - 1) total - 1 else (k + 1) * part - 1, k * part)
+                        segments += s
+                        queue += s
+                    }
+                }
+                info = i
+            }
+            startWorkers(first = seg0 to first)
+        } catch (t: Throwable) {
+            runCatching { first.close() }
+            throw t
+        }
+    }
+
+    private suspend fun CoroutineScope.startWorkers(first: Pair<Segment, Response>?) {
+        val i = info!!
+        val workers = if (i.acceptRanges && i.totalBytes > 0) request.maxConnections.coerceAtLeast(1) else 1
+        (listOf(launch { worker(first) }) + List(workers - 1) { launch { worker(null) } }).joinAll()
+    }
+
+    private suspend fun worker(first: Pair<Segment, Response>?) {
+        var seg = first?.first ?: nextSegment() ?: return
+        var initial = first?.second
+        while (true) {
+            download(seg, initial)
+            initial = null
+            seg = nextSegment() ?: return
+        }
+    }
+
+    /** A queued segment, or half of the biggest running one (work stealing). Null = nothing left worth a connection. */
+    private fun nextSegment(): Segment? = synchronized(lock) { queue.removeFirstOrNull() ?: steal() }
+
+    private fun steal(): Segment? {
+        val i = info ?: return null
+        if (!i.acceptRanges || i.totalBytes <= 0) return null
+        while (true) {
+            val victim = segments.filter { it.active }.maxByOrNull { it.remaining } ?: return null
+            val cur = victim.current.get()
+            val oldEnd = victim.end.get()
+            val remaining = oldEnd - cur + 1
+            if (remaining < 2 * request.minSplitBytes) return null
+            val mid = ((cur + remaining / 2) / ALIGN) * ALIGN
+            if (mid <= cur) return null
+            // The victim re-reads end before every write and trims, so this CAS is the whole hand-off.
+            if (!victim.end.compareAndSet(oldEnd, mid - 1)) continue
+            return Segment(mid, oldEnd, mid).also { segments += it }
+        }
+    }
+
+    private suspend fun download(seg: Segment, initial: Response?) {
+        seg.active = true
+        var pending = initial
+        var attempt = 0
+        val buffer = ByteBuffer.allocateDirect(bufferBytes)
+        try {
+            while (seg.remaining > 0) {
+                val before = seg.current.get()
+                try {
+                    val response = pending ?: openSegment(seg)
+                    pending = null
+                    try {
+                        stream(seg, response, buffer)
+                    } finally {
+                        // close() drains the rest for keep-alive; a concurrent pause cancel makes okio throw ISE there.
+                        runCatching { response.close() }
+                    }
+                    if (seg.end.get() == Long.MAX_VALUE) {
+                        // Unknown length: the end of the stream is the end of the file.
+                        seg.end.set(seg.current.get() - 1)
+                        info = info?.copy(totalBytes = seg.current.get())
+                        return
+                    }
+                    if (seg.remaining > 0 && seg.current.get() == before) throw IOException("Server closed the connection")
+                } catch (e: DownloadException) {
+                    throw e
+                } catch (e: IllegalStateException) {
+                    if (cancelled) throw kotlinx.coroutines.CancellationException("paused")
+                    throw e
+                } catch (e: IOException) {
+                    pending?.close(); pending = null
+                    currentCoroutineContext().ensureActive()
+                    if (cancelled) throw kotlinx.coroutines.CancellationException("paused")
+                    if (seg.current.get() > before) attempt = 0
+                    attempt++
+                    seg.retries++
+                    if (attempt > maxRetries) throw DownloadException(ErrorKind.NETWORK, e.message ?: "Network error", cause = e)
+                    if (info?.acceptRanges != true) seg.current.set(seg.start) // no ranges: only a restart from 0 is valid
+                    awaitNetwork()
+                    delay(backoff(attempt))
+                }
+            }
+        } finally {
+            pending?.close()
+            seg.active = false
+        }
+    }
+
+    private suspend fun openSegment(seg: Segment, refreshed: Boolean = false): Response {
+        val i = info!!
+        val end = seg.end.get().takeIf { it != Long.MAX_VALUE }
+        val r = execute(rangeRequest(i.finalUrl, request.headers, seg.current.get(), end))
+        val code = r.code
+        if (code.isExpiredLinkCode()) {
+            r.close()
+            if (refreshed) throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired (HTTP $code)", code)
+            refreshLink(i.finalUrl)
+            return openSegment(seg, refreshed = true)
+        }
+        if (code == 429 || code >= 500) { r.close(); throw IOException("HTTP $code") }
+        if (code == 200 && seg.current.get() == 0L && (!i.acceptRanges || seg.start == 0L)) {
+            if (i.totalBytes >= 0 && r.body.contentLength() >= 0 && r.body.contentLength() != i.totalBytes) {
+                r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed size")
+            }
+            return r
+        }
+        if (code != 206) {
+            r.close()
+            throw DownloadException(ErrorKind.HTTP, if (code == 200) "Server stopped accepting resume requests" else "HTTP $code", code)
+        }
+        val range = parseContentRange(r.header("Content-Range"))
+        val changed = range == null || range.first != seg.current.get() ||
+            (i.totalBytes >= 0 && range.third >= 0 && range.third != i.totalBytes) || !sameEtag(i.etag, r.header("ETag"))
+        if (changed) { r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed") }
+        return r
+    }
+
+    /**
+     * The direct link (often a signed CDN URL) expired. Ask the URL the user added again: it usually redirects to a
+     * fresh signed link for the same file. Same size and ETag, or the bytes on disk are not reused.
+     */
+    private suspend fun refreshLink(failedUrl: String) = refreshLock.withLock {
+        val i = info!!
+        if (i.finalUrl != failedUrl) return@withLock // another worker already refreshed it
+        if (request.url == failedUrl && i.finalUrl == request.url) {
+            // Nothing behind it to re-resolve.
+            throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired")
+        }
+        execute(rangeRequest(request.url, request.headers, 0, 0)).use { r ->
+            if (r.code.isExpiredLinkCode()) throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired (HTTP ${r.code})", r.code)
+            if (r.code != 206 && r.code != 200) throw IOException("HTTP ${r.code}")
+            val fresh = r.remoteInfo()
+            if ((i.totalBytes >= 0 && fresh.totalBytes != i.totalBytes) || !sameEtag(i.etag, fresh.etag)) {
+                throw DownloadException(ErrorKind.FILE_CHANGED, "The file behind the link changed")
+            }
+            info = i.copy(finalUrl = fresh.finalUrl)
+        }
+    }
+
+    private fun stream(seg: Segment, response: Response, buffer: ByteBuffer) {
+        val source = response.body.source()
+        while (true) {
+            buffer.clear()
+            var eof = false
+            // Fill the buffer, but hand bytes to disk as soon as the socket would block: fewer pwrites, no stalls.
+            while (buffer.hasRemaining()) {
+                if (source.read(buffer) == -1) { eof = true; break }
+                if (buffer.position() >= FLUSH_AT && source.buffer.size == 0L) break
+            }
+            buffer.flip()
+            val pos = seg.current.get()
+            val allowed = seg.remaining
+            if (allowed <= 0) return
+            if (buffer.remaining() > allowed) buffer.limit(buffer.position() + allowed.toInt())
+            var p = pos
+            try {
+                while (buffer.hasRemaining()) p += channel.write(buffer, p)
+            } catch (e: IOException) {
+                throw DownloadException(ErrorKind.DISK, e.message ?: "Write failed", cause = e)
+            }
+            seg.current.set(p)
+            if (eof || p > seg.end.get()) return
+            if (cancelled) throw IOException("Canceled")
+        }
+    }
+
+    private fun execute(request: Request): Response {
+        val call = client.newCall(request)
+        liveCalls += call
+        if (cancelled) call.cancel()
+        try {
+            return call.execute()
+        } finally {
+            liveCalls -= call
+        }
+    }
+
+    private suspend fun openChannel(i: RemoteInfo): FileChannel = try {
+        openFile(i)
+    } catch (e: IOException) {
+        throw DownloadException(ErrorKind.DISK, e.message ?: "Cannot open file", cause = e)
+    }
+
+    private suspend fun <T> retrying(block: () -> T): T {
+        var attempt = 0
+        while (true) {
+            try {
+                return block()
+            } catch (e: IOException) {
+                currentCoroutineContext().ensureActive()
+                if (++attempt > maxRetries) throw DownloadException(ErrorKind.NETWORK, e.message ?: "Network error", cause = e)
+                awaitNetwork()
+                delay(backoff(attempt))
+            }
+        }
+    }
+
+    private fun backoff(attempt: Int): Long {
+        val base = (retryBaseMillis shl (attempt - 1).coerceAtMost(6)).coerceAtMost(60_000)
+        return base / 2 + Random.nextLong(base / 2 + 1)
+    }
+
+    /** Saved segments hold only unfinished ranges, so with a known size everything outside them is on disk. */
+    private fun downloaded(): Long {
+        val total = info?.totalBytes ?: -1
+        return if (total >= 0) total - segments.sumOf { it.remaining } else segments.sumOf { it.current.get() - it.start }
+    }
+
+    private fun sample() {
+        val now = downloaded()
+        val delta = if (lastDownloaded < 0) 0 else (now - lastDownloaded).coerceAtLeast(0)
+        lastDownloaded = now
+        totalSpeed = if (totalSpeed == 0.0) delta * 4.0 else totalSpeed * (1 - ALPHA) + delta * 4.0 * ALPHA
+        val segs = segments.sortedBy { it.start }.map { s ->
+            val cur = s.current.get()
+            val d = (cur - s.sampledAt).coerceAtLeast(0)
+            s.sampledAt = cur
+            s.speed = s.speed * (1 - ALPHA) + d * 4.0 * ALPHA
+            SegmentProgress(s.start, s.end.get(), cur, s.speed.toLong(), s.active, s.retries)
+        }
+        _progress.value = Progress(info, now, totalSpeed.toLong(), segs)
+    }
+
+    private companion object {
+        const val ALIGN = 64L * 1024
+        const val FLUSH_AT = 32 * 1024
+        const val ALPHA = 0.3
+    }
+}
