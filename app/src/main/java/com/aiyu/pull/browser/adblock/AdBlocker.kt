@@ -1,13 +1,14 @@
 package com.aiyu.pull.browser.adblock
 
 import android.content.Context
-import java.util.Base64
 import android.webkit.WebResourceResponse
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.util.Base64
+import java.util.zip.GZIPInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,7 +23,7 @@ class AdBlocker(
         },
     )
 
-    private val domains = HashSet<String>(4096)
+    private val domains = HashSet<String>(300_000)
 
     init {
         loadStarterDomains()
@@ -54,7 +55,7 @@ class AdBlocker(
         try {
             val stream = assetLoader?.invoke() ?: return
             stream.use { s ->
-                BufferedReader(InputStreamReader(s)).forEachLine { line ->
+                BufferedReader(InputStreamReader(s), 65536).forEachLine { line ->
                     val trimmed = line.trim().lowercase()
                     if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && !trimmed.startsWith("!")) {
                         domains.add(trimmed)
@@ -67,23 +68,89 @@ class AdBlocker(
     }
 
     /**
-     * Returns true if [url] points to a known ad, tracker, popup, or malicious redirect domain.
+     * Returns true if [url] matches any known ad, tracker, popup, or banner patterns.
+     * Optionally takes [pageUrl] to evaluate third-party ad heuristics.
      */
-    fun isBlocked(url: String): Boolean {
+    fun isBlocked(url: String, pageUrl: String? = null): Boolean {
         if (url.isBlank() || url == "about:blank") return false
         val host = extractHost(url) ?: return false
+
+        // 1. Direct and hierarchical suffix domain matching against 260,000+ domains
         if (isAdDomain(host)) return true
 
+        // 2. Known ad network substrings in host
+        if (host.contains(".doubleclick.") ||
+            host.contains(".googlesyndication.") ||
+            host.contains(".adnxs.") ||
+            host.contains(".criteo.") ||
+            host.contains(".taboola.") ||
+            host.contains(".outbrain.") ||
+            host.contains(".popads.") ||
+            host.contains(".exoclick.") ||
+            host.contains(".adsterra.") ||
+            host.contains(".smartadserver.") ||
+            host.contains(".rubiconproject.") ||
+            host.contains(".pubmatic.")
+        ) {
+            return true
+        }
+
+        // 3. Ad path and query pattern heuristics
         val path = extractPath(url)
-        return path.contains("/pagead/") ||
+        val query = extractQuery(url)
+        if (path.contains("/pagead/") ||
             path.contains("/adservice/") ||
             path.contains("/ad-delivery/") ||
+            path.contains("/adserver/") ||
+            path.contains("/adsystem/") ||
+            path.contains("/gpt.js") ||
+            path.contains("/prebid.js") ||
+            path.contains("/pubads") ||
+            path.contains("/adsbygoogle") ||
+            path.contains("/ad-frame") ||
+            path.contains("/adbanner") ||
+            path.contains("/adsbox") ||
             path.contains("/popunder") ||
-            path.contains("/popup.php")
+            path.contains("/popup.php") ||
+            path.contains("/ad-unit") ||
+            path.contains("/banner-ad")
+        ) {
+            return true
+        }
+
+        if (query.contains("ad_unit=") ||
+            query.contains("ad_slot=") ||
+            query.contains("ad_client=") ||
+            query.contains("goog_param=") ||
+            query.contains("googleads") ||
+            query.contains("ad_type=")
+        ) {
+            return true
+        }
+
+        // 4. Third-party ad subdomain heuristics
+        if (pageUrl != null) {
+            val pageHost = extractHost(pageUrl)
+            if (pageHost != null && !isSameDomain(host, pageHost)) {
+                if (host.startsWith("ad.") ||
+                    host.startsWith("ads.") ||
+                    host.startsWith("adserver.") ||
+                    host.startsWith("track.") ||
+                    host.startsWith("tracker.") ||
+                    host.startsWith("analytics.") ||
+                    host.startsWith("pixel.") ||
+                    host.startsWith("telemetry.")
+                ) {
+                    return true
+                }
+            }
+        }
+
+        return false
     }
 
     /**
-     * Checks if [host] matches any blocked domain or subdomain.
+     * Checks if [host] matches any blocked domain or parent domain.
      */
     fun isAdDomain(host: String): Boolean {
         var h = host.trimEnd('.').substringBefore(':')
@@ -111,6 +178,24 @@ class AdBlocker(
         val slash = afterScheme.indexOf('/')
         if (slash < 0) return ""
         return afterScheme.substring(slash).substringBefore('?').substringBefore('#').lowercase()
+    }
+
+    fun extractQuery(url: String): String {
+        val clean = url.trim()
+        val q = clean.substringAfter('?', "")
+        return if (q.isEmpty()) "" else q.substringBefore('#').lowercase()
+    }
+
+    fun isSameDomain(host1: String, host2: String): Boolean {
+        if (host1 == host2) return true
+        val p1 = host1.split('.')
+        val p2 = host2.split('.')
+        if (p1.size >= 2 && p2.size >= 2) {
+            val root1 = "${p1[p1.size - 2]}.${p1[p1.size - 1]}"
+            val root2 = "${p2[p2.size - 2]}.${p2[p2.size - 1]}"
+            return root1 == root2
+        }
+        return false
     }
 
     /**
@@ -147,30 +232,53 @@ class AdBlocker(
         )
 
         /**
-         * CSS rules to hide ad containers, sponsored elements, and transparent click-jack overlays.
+         * Comprehensive CSS rules to hide ad banners, sponsored sections, sticky ads,
+         * recommendation grids, video ad modules, and transparent click-jack overlays.
          */
         const val COSMETIC_CSS = """
-            [id*="google_ads"], [id*="banner"], [class*="ad-banner"], [class*="adsbox"],
-            [class*="ad_box"], [class*="ad-container"], [class*="ad-wrapper"],
-            [class*="advertisement"], [class*="sponsor"], [class*="taboola"],
-            [class*="outbrain"], [class*="mgid"], ins.adsbygoogle,
-            iframe[src*="doubleclick"], iframe[src*="googlesyndication"],
-            iframe[src*="adsterra"], iframe[src*="exoclick"], iframe[src*="popads"],
-            div[data-ad-unit], div[data-ad-client], .ad-overlay, .popunder,
-            .popup-overlay, #popup-overlay, .ad-modal {
+            ins.adsbygoogle, [id^="google_ads_"], [id^="div-gpt-ad"],
+            [data-ad-client], [data-ad-slot], [data-google-query-id],
+            [class*="leaderboard"], [id*="leaderboard"],
+            [class*="ad-banner"], [class*="ad_banner"], [id*="ad-banner"], [id*="ad_banner"],
+            [class*="banner-ad"], [class*="ad-container"], [class*="ad_container"],
+            [class*="ad-wrapper"], [class*="ad_wrapper"], [class*="ad-slot"], [class*="ad_slot"],
+            [class*="ad-box"], [class*="ad_box"], [class*="ad-holder"], [class*="ad-zone"],
+            [class*="ad-unit"], [class*="ad-card"], [class*="ad-item"], [class*="ad-placement"],
+            [class*="sponsored"], [id*="sponsored"], [class*="promoted-post"],
+            [class*="promoted-content"], [class*="promoted-link"],
+            [class*="taboola"], [id*="taboola"], [class*="outbrain"], [id*="outbrain"],
+            [class*="mgid"], [id*="mgid"], [class*="revcontent"], [id*="revcontent"],
+            [class*="zergnet"], [id*="zergnet"], [class*="sticky-ad"], [id*="sticky-ad"],
+            [class*="floating-ad"], [id*="floating-ad"], [class*="bottom-ad"], [class*="top-ad"],
+            [class*="anchor-ad"], [class*="ad-sticky"], [class*="ad-float"], [id*="ad-sticky"],
+            .ad-overlay, .popunder, .popup-overlay, #popup-overlay, .ad-modal,
+            [class*="click-jack"], [class*="popup-wrapper"], [class*="interstitial"], [id*="interstitial"],
+            [class*="ad-curtain"], [id*="ad-curtain"],
+            .ytp-ad-module, .ytp-ad-overlay-container, .ytp-ad-player-overlay, .video-ads,
+            [class*="video-ad-overlay"], [class*="ad-interstitial"], [class*="vpaid-ad"],
+            iframe[src*="doubleclick"], iframe[src*="googlesyndication"], iframe[src*="adservice"],
+            iframe[src*="adserver"], iframe[src*="adsystem"], iframe[src*="adnxs"],
+            iframe[src*="amazon-adsystem"], iframe[src*="smartadserver"], iframe[src*="criteo"],
+            iframe[src*="openx"], iframe[src*="rubicon"], iframe[src*="pubmatic"],
+            iframe[src*="adsterra"], iframe[src*="exoclick"], iframe[src*="popads"] {
                 display: none !important;
                 visibility: hidden !important;
                 opacity: 0 !important;
                 pointer-events: none !important;
                 height: 0 !important;
+                min-height: 0 !important;
                 max-height: 0 !important;
                 width: 0 !important;
+                min-width: 0 !important;
                 max-width: 0 !important;
+                position: absolute !important;
+                top: -9999px !important;
+                left: -9999px !important;
             }
         """
 
         /**
-         * JavaScript snippet injected into the page to install cosmetic CSS and suppress popup bursts.
+         * Injected JavaScript for cosmetic CSS and auto-skip helpers.
          */
         val INJECT_COSMETIC_SCRIPT = """
             (function() {
@@ -181,6 +289,11 @@ class AdBlocker(
                         style.textContent = ${"\"" + COSMETIC_CSS.replace("\n", " ").replace("\"", "\\\"") + "\""};
                         (document.head || document.documentElement).appendChild(style);
                     }
+                    if (document.body && document.body.style.overflow === 'hidden') {
+                        document.body.style.overflow = '';
+                    }
+                    var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton');
+                    if (skipBtn) skipBtn.click();
                 } catch(e) {}
             })();
         """.trimIndent()

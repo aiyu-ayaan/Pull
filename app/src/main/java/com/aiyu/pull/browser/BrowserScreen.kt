@@ -530,7 +530,7 @@ private fun setupTabWebView(
             val currentSettings = getSettings()
 
             // 1. Block ad & tracker redirects
-            if (currentSettings.browserAdBlock && adBlocker.isBlocked(dest)) {
+            if (currentSettings.browserAdBlock && adBlocker.isBlocked(dest, view.url)) {
                 tab.blockedCount++
                 if (tab.isPopupCandidate) {
                     onCloseTab(tab.id)
@@ -557,7 +557,7 @@ private fun setupTabWebView(
             val currentSettings = getSettings()
             if (!currentSettings.browserAdBlock) return null
             val reqUrl = request.url.toString()
-            if (adBlocker.isBlocked(reqUrl)) {
+            if (adBlocker.isBlocked(reqUrl, view.url)) {
                 view.post { tab.blockedCount++ }
                 return adBlocker.createBlockedResponse(reqUrl)
             }
@@ -567,7 +567,7 @@ private fun setupTabWebView(
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
             val currentSettings = getSettings()
             if (url != "about:blank") {
-                if (currentSettings.browserAdBlock && adBlocker.isBlocked(url)) {
+                if (currentSettings.browserAdBlock && adBlocker.isBlocked(url, view.url)) {
                     view.stopLoading()
                     tab.blockedCount++
                     if (tab.isPopupCandidate) {
@@ -638,7 +638,7 @@ private fun setupTabWebView(
                 // Check hit test result if available
                 val hit = view?.hitTestResult
                 val extra = hit?.extra
-                if (!extra.isNullOrBlank() && adBlocker.isBlocked(extra)) {
+                if (!extra.isNullOrBlank() && adBlocker.isBlocked(extra, view?.url)) {
                     tab.blockedCount++
                     return false
                 }

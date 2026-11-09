@@ -7,11 +7,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.FileInputStream
+import java.util.zip.GZIPInputStream
 
 class AdBlockerTest {
     private val adBlocker = AdBlocker {
-        val assetFile = File("src/main/assets/adblock_domains.txt")
-        if (assetFile.exists()) FileInputStream(assetFile) else null
+        val txtFile = File("src/main/assets/adblock_domains.txt")
+        if (txtFile.exists()) FileInputStream(txtFile) else null
     }
 
     @Test
@@ -23,6 +24,9 @@ class AdBlockerTest {
         assertTrue(adBlocker.isBlocked("https://serve.popcash.net/click"))
         assertTrue(adBlocker.isBlocked("https://adsterra.com/direct/link"))
         assertTrue(adBlocker.isBlocked("https://c.exoclick.com/tag.js"))
+        assertTrue(adBlocker.isBlocked("https://cdn.taboola.com/libtrc/unip/1/tfa.js"))
+        assertTrue(adBlocker.isBlocked("https://widgets.outbrain.com/outbrain.js"))
+        assertTrue(adBlocker.isBlocked("https://securepubads.g.doubleclick.net/tag/js/gpt.js"))
     }
 
     @Test
@@ -33,6 +37,20 @@ class AdBlockerTest {
         assertFalse(adBlocker.isBlocked("https://www.google.com/search?q=kotlin"))
         assertFalse(adBlocker.isBlocked("https://instagram.com/reels/123"))
         assertFalse(adBlocker.isBlocked("about:blank"))
+    }
+
+    @Test
+    fun blocksThirdPartyAdSubdomains() {
+        assertTrue(adBlocker.isBlocked("https://ads.partnercdn.com/script.js", "https://example.com"))
+        assertTrue(adBlocker.isBlocked("https://tracker.analytics-vendor.org/collect", "https://news.com"))
+        assertFalse(adBlocker.isBlocked("https://static.example.com/main.js", "https://example.com"))
+    }
+
+    @Test
+    fun blocksAdPathAndQueryPatterns() {
+        assertTrue(adBlocker.isBlocked("https://cdn.example.org/js/prebid.js"))
+        assertTrue(adBlocker.isBlocked("https://cdn.example.org/adserver/loader"))
+        assertTrue(adBlocker.isBlocked("https://somecdn.net/render?ad_unit=banner_300x250"))
     }
 
     @Test
@@ -48,5 +66,6 @@ class AdBlockerTest {
         assertEquals("duckduckgo.com", adBlocker.extractHost("https://duckduckgo.com/?q=pull"))
         assertEquals("googleads.g.doubleclick.net", adBlocker.extractHost("https://googleads.g.doubleclick.net:443/pagead/ads"))
         assertEquals("/pagead/ads", adBlocker.extractPath("https://doubleclick.net/pagead/ads?foo=bar"))
+        assertEquals("foo=bar", adBlocker.extractQuery("https://doubleclick.net/pagead/ads?foo=bar#hash"))
     }
 }
