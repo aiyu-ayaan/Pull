@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.1-alpha.4](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.3...v0.1.1-alpha.4) (2026-11-09)
+
+### Features
+
+* Expand blocklist to 260k+ domains with heuristics and cosmetic CSS
+* Add ad blocker, popup blocker, tabs, and documentation
+* Start on blank home page and auto-select address text on focus
+* Add app filters, animated multi-selection, and file deletion dialog
+* Auto-update yt-dlp and preview thumbnails in cards
+* Add initial documentation for Pull download manager
+
+### Bug fixes
+
+* Remove DuckDuckGo search default and update test
+
+### Other changes
+
+* Update TODO list with completed features across phases
+
 ## [0.1.1-alpha.3](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.2...v0.1.1-alpha.3) (2026-11-09)
 
 ### Other changes
