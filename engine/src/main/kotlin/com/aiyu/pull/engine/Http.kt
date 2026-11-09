@@ -75,3 +75,16 @@ internal fun sameEtag(a: String?, b: String?): Boolean =
     a == null || b == null || a.removePrefix("W/") == b.removePrefix("W/")
 
 internal fun Int.isExpiredLinkCode() = this == 401 || this == 403 || this == 404 || this == 410
+
+/** Asks for one byte to learn name, size and range support before the user commits to the download. */
+suspend fun probe(client: OkHttpClient, url: String, headers: Map<String, String> = emptyMap()): RemoteInfo =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val call = client.newCall(rangeRequest(url, headers, 0, 0))
+        call.execute().use { r ->
+            when {
+                r.code == 200 || r.code == 206 -> r.remoteInfo()
+                r.code.isExpiredLinkCode() -> throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired (HTTP ${r.code})", r.code)
+                else -> throw DownloadException(ErrorKind.HTTP, "HTTP ${r.code}", r.code)
+            }
+        }
+    }

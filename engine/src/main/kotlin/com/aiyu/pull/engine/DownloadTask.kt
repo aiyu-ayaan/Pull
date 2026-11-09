@@ -90,26 +90,29 @@ class DownloadTask(
     }
 
     suspend fun run(): RemoteInfo = withContext(Dispatchers.IO) {
-        coroutineScope {
-            // Blocking socket reads ignore coroutine cancellation; cancelling the calls unblocks them at once on pause.
-            launch {
-                try { awaitCancellation() } finally { cancelled = true; liveCalls.forEach(Call::cancel) }
+        // Closed only after every worker has stopped, so a pause never shows up as a write error.
+        try { work() } finally { if (::channel.isInitialized) runCatching { channel.close() } }
+    }
+
+    private suspend fun work(): RemoteInfo = coroutineScope {
+        // Blocking socket reads ignore coroutine cancellation; cancelling the calls unblocks them at once on pause.
+        launch {
+            try { awaitCancellation() } finally { cancelled = true; liveCalls.forEach(Call::cancel) }
+        }
+        val sampler = launch { while (true) { delay(250); sample() } }
+        try {
+            val resume = request.resume
+            if (resume != null && resume.info.acceptRanges && resume.info.totalBytes > 0) resumeFrom(resume) else fresh()
+            val i = info!!
+            if (i.totalBytes >= 0 && segments.any { it.remaining > 0 }) {
+                throw DownloadException(ErrorKind.NETWORK, "Download stopped before the end")
             }
-            val sampler = launch { while (true) { delay(250); sample() } }
-            try {
-                val resume = request.resume
-                if (resume != null && resume.info.acceptRanges && resume.info.totalBytes > 0) resumeFrom(resume) else fresh()
-                val i = info!!
-                if (i.totalBytes >= 0 && segments.any { it.remaining > 0 }) {
-                    throw DownloadException(ErrorKind.NETWORK, "Download stopped before the end")
-                }
-                try { channel.force(false) } catch (e: IOException) { throw DownloadException(ErrorKind.DISK, e.message ?: "fsync failed", cause = e) }
-                sample()
-                i
-            } finally {
-                sampler.cancel()
-                coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
-            }
+            try { channel.force(false) } catch (e: IOException) { throw DownloadException(ErrorKind.DISK, e.message ?: "fsync failed", cause = e) }
+            sample()
+            i
+        } finally {
+            sampler.cancel()
+            coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
         }
     }
 
