@@ -62,6 +62,11 @@ data class DownloadEntity(
     val videoFormat: String? = null,
     /** Video: extra yt-dlp arguments from a custom command template. */
     val extraArgs: String? = null,
+    /** Torrent: per-torrent speed limits in bytes per second; 0 = unlimited. */
+    @ColumnInfo(defaultValue = "0") val downLimit: Int = 0,
+    @ColumnInfo(defaultValue = "0") val upLimit: Int = 0,
+    /** Torrent: trackers the user added, one URL per line. */
+    @ColumnInfo(defaultValue = "") val extraTrackers: String = "",
 ) {
     val headers: Map<String, String> get() = runCatching { Json.decodeFromString<Map<String, String>>(headersJson) }.getOrDefault(emptyMap())
 
@@ -132,6 +137,15 @@ interface DownloadDao {
     @Query("UPDATE downloads SET selectedFiles = :selected WHERE id = :id")
     suspend fun setSelectedFiles(id: Long, selected: String)
 
+    @Query("UPDATE downloads SET sequential = :sequential WHERE id = :id")
+    suspend fun setSequential(id: Long, sequential: Boolean)
+
+    @Query("UPDATE downloads SET downLimit = :down, upLimit = :up WHERE id = :id")
+    suspend fun setLimits(id: Long, down: Int, up: Int)
+
+    @Query("UPDATE downloads SET extraTrackers = :trackers WHERE id = :id")
+    suspend fun setExtraTrackers(id: Long, trackers: String)
+
     @Query("UPDATE downloads SET activeMillis = activeMillis + :activeDelta WHERE id = :id")
     suspend fun addActiveTime(id: Long, activeDelta: Long)
 
@@ -147,9 +161,9 @@ interface DownloadDao {
 
 @Database(
     entities = [DownloadEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class PullDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao

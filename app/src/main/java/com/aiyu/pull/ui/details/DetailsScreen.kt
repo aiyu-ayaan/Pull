@@ -84,11 +84,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aiyu.pull.R
 import com.aiyu.pull.data.Kind
+import com.aiyu.pull.download.TorrentCommand
 import com.aiyu.pull.data.Status
 import com.aiyu.pull.engine.ErrorKind
 import com.aiyu.pull.engine.SegmentProgress
 import com.aiyu.pull.ui.components.FileKind
-import com.aiyu.pull.ui.components.PieceMap
 import com.aiyu.pull.ui.components.SegmentMap
 import com.aiyu.pull.ui.components.ShapeIcon
 import com.aiyu.pull.ui.components.SpeedGraph
@@ -131,6 +131,9 @@ fun DetailsScreen(
     var askDelete by rememberSaveable { mutableStateOf(false) }
     var askLink by rememberSaveable { mutableStateOf(false) }
     var pickFiles by rememberSaveable { mutableStateOf(false) }
+    var askLimits by rememberSaveable { mutableStateOf(false) }
+    var askTrackers by rememberSaveable { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableStateOf(TorrentTab.STATUS) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     val e = entity
@@ -148,6 +151,16 @@ fun DetailsScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_back))
                     }
                 },
+                actions = {
+                    if (e?.kind == Kind.TORRENT) TorrentMenu(
+                        sequential = live[e.id]?.torrent?.sequential ?: e.sequential,
+                        running = e.status == Status.RUNNING,
+                        onCommand = { vm.torrentCommand(id, it) },
+                        onLimits = { askLimits = true },
+                        onAddTrackers = { askTrackers = true },
+                        onSelectFiles = { pickFiles = true },
+                    )
+                },
                 scrollBehavior = scroll,
             )
         },
@@ -161,10 +174,11 @@ fun DetailsScreen(
         LazyColumn(
             contentPadding = PaddingValues(
                 start = readableGutter(), end = readableGutter(),
-                top = padding.calculateTopPadding() + Dimens.sm, bottom = padding.calculateBottomPadding() + Dimens.xxl,
+                top = Dimens.sm, bottom = padding.calculateBottomPadding() + Dimens.xxl,
             ),
             verticalArrangement = Arrangement.spacedBy(Dimens.md),
-            modifier = Modifier.fillMaxSize(),
+            // Padding outside the list, so the pinned torrent tabs stop below the top bar instead of under it.
+            modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         ) {
             item(key = "hero") { Hero(view) }
             item(key = "actions") {
@@ -188,24 +202,26 @@ fun DetailsScreen(
                     onPasteLink = { askLink = true },
                 )
             }
-            if (e.status != Status.COMPLETED) item(key = "stats") { Stats(view) }
-            when (e.kind) {
-                Kind.HTTP -> if (e.status != Status.COMPLETED && view.total > 0) item(key = "map") { MapCard(view) }
-                Kind.TORRENT -> {
-                    val pieces = view.live?.torrent?.pieces
-                    if (pieces != null && pieces.isNotEmpty() && e.status != Status.COMPLETED) item(key = "pieces") {
-                        Card(stringResource(R.string.details_pieces)) {
-                            PieceMap(pieces, false)
-                            Text(
-                                stringResource(R.string.details_pieces_hint),
-                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    item(key = "files") { FilesCard(view, onSelect = { pickFiles = true }) }
+            val copy = { label: String, value: String ->
+                scope.launch {
+                    clipboardCopy(context, label, value)
+                    snackbar.showSnackbar(context.getString(R.string.copied, label))
                 }
-                Kind.VIDEO -> Unit
+                Unit
             }
+            if (e.kind == Kind.TORRENT) {
+                stickyHeader(key = "tabs") { TorrentTabRow(tab) { tab = it } }
+                torrentTab(
+                    tab, view,
+                    onSelectFiles = { pickFiles = true },
+                    onCommand = { vm.torrentCommand(id, it) },
+                    onAddTrackers = { askTrackers = true },
+                    onCopy = copy,
+                )
+                return@LazyColumn
+            }
+            if (e.status != Status.COMPLETED) item(key = "stats") { Stats(view) }
+            if (e.kind == Kind.HTTP && e.status != Status.COMPLETED && view.total > 0) item(key = "map") { MapCard(view) }
             if (view.live != null) item(key = "graph") {
                 Card(stringResource(R.string.details_speed_graph)) {
                     SpeedGraph(view.live.history)
@@ -217,15 +233,23 @@ fun DetailsScreen(
             }
             val segs = view.live?.segments.orEmpty()
             if (segs.isNotEmpty()) item(key = "connections") { Connections(segs) }
-            item(key = "info") {
-                Info(view, onCopy = { label, value ->
-                    scope.launch {
-                        clipboardCopy(context, label, value)
-                        snackbar.showSnackbar(context.getString(R.string.copied, label))
-                    }
-                })
-            }
+            item(key = "info") { Info(view, onCopy = copy) }
         }
+    }
+
+    if (askLimits && e != null) {
+        val t = live[e.id]?.torrent
+        LimitsDialog(
+            down = t?.downLimit ?: e.downLimit, up = t?.upLimit ?: e.upLimit,
+            onDismiss = { askLimits = false },
+            onApply = { d, u -> askLimits = false; vm.torrentCommand(id, TorrentCommand.Limits(d, u)) },
+        )
+    }
+    if (askTrackers) {
+        AddTrackersDialog(
+            onDismiss = { askTrackers = false },
+            onAdd = { askTrackers = false; vm.torrentCommand(id, TorrentCommand.AddTrackers(it)) },
+        )
     }
 
     if (askDelete && e != null) {
@@ -458,7 +482,7 @@ private fun Problem(view: DownloadView, onRetry: () -> Unit, onRestart: () -> Un
 }
 
 @Composable
-private fun Stats(view: DownloadView) {
+internal fun Stats(view: DownloadView) {
     val e = view.entity
     val speed by rememberGlide(view.speed)
     val avg = if (e.activeMillis > 1000) e.downloadedBytes * 1000 / e.activeMillis else 0
@@ -561,7 +585,7 @@ private fun Connections(segs: List<SegmentProgress>) {
 }
 
 @Composable
-private fun Info(view: DownloadView, onCopy: (String, String) -> Unit) {
+internal fun Info(view: DownloadView, onCopy: (String, String) -> Unit) {
     val e = view.entity
     val context = LocalContext.current
     val rows = listOfNotNull(
@@ -598,7 +622,7 @@ private fun Info(view: DownloadView, onCopy: (String, String) -> Unit) {
 }
 
 @Composable
-private fun Card(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun Card(title: String, content: @Composable ColumnScope.() -> Unit) {
     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.lg), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
             Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -626,7 +650,7 @@ private fun selectedSet(saved: String, count: Int): Set<Int> =
     saved.split(',').mapNotNull(String::toIntOrNull).toSet().ifEmpty { (0 until count).toSet() }
 
 @Composable
-private fun FilesCard(view: DownloadView, onSelect: () -> Unit) {
+internal fun FilesCard(view: DownloadView, onSelect: () -> Unit) {
     val e = view.entity
     val files = view.live?.torrent?.files
     Card(stringResource(R.string.torrent_files)) {

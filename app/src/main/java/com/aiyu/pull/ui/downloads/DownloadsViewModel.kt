@@ -37,6 +37,7 @@ class DownloadsViewModel @Inject constructor(
     fun refreshLink(id: Long, url: String) = manager.refreshLink(id, url)
     fun setTorrentFiles(id: Long, selected: Set<Int>, count: Int) = manager.setTorrentFiles(id, selected, count)
     fun torrentFiles(e: DownloadEntity) = manager.torrentFiles(e)
+    fun torrentCommand(id: Long, c: com.aiyu.pull.download.TorrentCommand) = manager.torrentCommand(id, c)
 }
 
 /** One download as the UI shows it: live numbers while running, saved numbers otherwise. */

@@ -194,6 +194,20 @@ class DownloadManager @Inject constructor(
         running[id]?.transfer?.updateFiles(if (all) emptySet() else selected)
     }
 
+    /** Torrent options from the details screen: saved, then applied to the running torrent if any. */
+    fun torrentCommand(id: Long, c: TorrentCommand) = scope.launch {
+        when (c) {
+            is TorrentCommand.Sequential -> dao.setSequential(id, c.on)
+            is TorrentCommand.Limits -> dao.setLimits(id, c.down, c.up)
+            is TorrentCommand.AddTrackers -> dao.get(id)?.let { e ->
+                val all = (e.extraTrackers.lines() + c.urls).map(String::trim).filter { it.isNotEmpty() }.distinct()
+                dao.setExtraTrackers(id, all.joinToString("\n"))
+            }
+            TorrentCommand.Recheck, TorrentCommand.Reannounce -> Unit
+        }
+        running[id]?.transfer?.torrentCommand(c)
+    }
+
     /** Files inside a torrent, from its stored .torrent; empty until a magnet's metadata arrived. */
     fun torrentFiles(e: DownloadEntity): List<Pair<String, Long>> =
         e.torrentPath?.let { runCatching { torrents.get().parse(java.io.File(it).readBytes()).files }.getOrNull() }.orEmpty()

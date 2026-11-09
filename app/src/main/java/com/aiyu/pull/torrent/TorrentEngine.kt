@@ -8,7 +8,10 @@ import android.os.Environment
 import com.aiyu.pull.data.DownloadDao
 import com.aiyu.pull.data.DownloadEntity
 import com.aiyu.pull.download.FileStore
+import com.aiyu.pull.download.PeerLive
+import com.aiyu.pull.download.TorrentCommand
 import com.aiyu.pull.download.TorrentFileLive
+import com.aiyu.pull.download.TrackerLive
 import com.aiyu.pull.download.TorrentLive
 import com.aiyu.pull.download.Transfer
 import com.aiyu.pull.engine.Progress
@@ -22,6 +25,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import org.libtorrent4j.AnnounceEntry
 import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SessionParams
@@ -118,6 +122,7 @@ private class TorrentTransfer(
     @Volatile private var handle: TorrentHandle? = null
     @Volatile private var count = 0
     @Volatile private var paths: List<File> = emptyList()
+    @Volatile private var about = Triple("", "", 0L)
 
     override suspend fun run(): Long = withContext(Dispatchers.IO) {
         engine.ensureStarted()
@@ -141,7 +146,11 @@ private class TorrentTransfer(
         val h = found ?: throw IOException("Torrent session did not accept the torrent")
         this@TorrentTransfer.handle = h
         count = ti.numFiles()
+        about = Bencode.about(file.readBytes())
         Bencode.webSeeds(file.readBytes()).forEach { url -> if (url !in h.urlSeeds()) h.addUrlSeed(url) }
+        e.extraTrackers.lines().map(String::trim).filter { it.isNotEmpty() }.forEach { h.addTracker(AnnounceEntry(it)) }
+        h.setDownloadLimit(e.downLimit)
+        h.setUploadLimit(e.upLimit)
         h.resume()
         try {
             while (true) {
@@ -183,7 +192,7 @@ private class TorrentTransfer(
         )
         val bits = st.pieces()
         val n = bits.size()
-        val buckets = minOf(n, 240)
+        val buckets = minOf(n, 1024)
         val pieces = BooleanArray(buckets) { b ->
             val from = b * n / buckets
             val to = ((b + 1) * n / buckets).coerceAtLeast(from + 1)
@@ -192,6 +201,19 @@ private class TorrentTransfer(
         val fs = ti.files()
         val done = runCatching { h.fileProgress() }.getOrNull()
         val prio = runCatching { h.filePriorities() }.getOrNull()
+        val trackers = runCatching { h.trackers() }.getOrNull().orEmpty().map { t ->
+            // A tracker has one endpoint per local interface; the best one tells its state.
+            val infos = t.endpoints().map { it.infohashV1() }
+            TrackerLive(
+                url = t.url(), tier = t.tier(),
+                working = infos.any { it.isWorking() }, updating = infos.any { it.updating() },
+                fails = infos.maxOfOrNull { it.fails().toInt() } ?: 0,
+                message = infos.firstNotNullOfOrNull { it.message().takeIf(String::isNotBlank) }.orEmpty(),
+            )
+        }
+        val peers = runCatching { h.peerInfo() }.getOrNull().orEmpty().map { p ->
+            PeerLive(p.ip(), p.client(), p.downSpeed().toLong(), p.upSpeed().toLong(), p.progress(), p.totalDownload(), p.totalUpload())
+        }
         _torrent.value = TorrentLive(
             state = st.state().name.lowercase(),
             peers = st.numPeers(),
@@ -202,12 +224,39 @@ private class TorrentTransfer(
             files = List(fs.numFiles()) {
                 TorrentFileLive(fs.filePath(it), fs.fileSize(it), done?.getOrNull(it) ?: 0, prio?.getOrNull(it) != Priority.IGNORE)
             },
+            trackers = trackers,
+            peerList = peers,
+            pieceCount = n,
+            pieceSize = ti.pieceLength(),
+            piecesHave = (0 until n).count { bits.getBit(it) },
+            swarmSeeds = st.numComplete(),
+            swarmPeers = st.numIncomplete(),
+            availability = st.distributedCopies(),
+            downloadedTotal = st.allTimeDownload(),
+            sequential = h.flags.and_(TorrentFlags.SEQUENTIAL_DOWNLOAD).non_zero(),
+            downLimit = h.downloadLimit,
+            upLimit = h.uploadLimit,
+            savePath = h.savePath(),
+            comment = about.first,
+            creator = about.second,
+            createdAt = about.third,
         )
     }
 
     override fun updateFiles(selected: Set<Int>) {
         val h = handle?.takeIf { it.isValid } ?: return
         h.prioritizeFiles(Array(count) { if (selected.isEmpty() || it in selected) Priority.DEFAULT else Priority.IGNORE })
+    }
+
+    override fun torrentCommand(c: TorrentCommand) {
+        val h = handle?.takeIf { it.isValid } ?: return
+        when (c) {
+            TorrentCommand.Recheck -> h.forceRecheck()
+            TorrentCommand.Reannounce -> { h.forceReannounce(); h.forceDHTAnnounce() }
+            is TorrentCommand.Sequential -> if (c.on) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            is TorrentCommand.Limits -> { h.setDownloadLimit(c.down); h.setUploadLimit(c.up) }
+            is TorrentCommand.AddTrackers -> c.urls.forEach { h.addTracker(AnnounceEntry(it)) }
+        }
     }
 
     override suspend fun save(activeDelta: Long) {

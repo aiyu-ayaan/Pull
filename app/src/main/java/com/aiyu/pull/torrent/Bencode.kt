@@ -14,6 +14,16 @@ object Bencode {
         }.filter { it.startsWith("http://") || it.startsWith("https://") }
     }.getOrDefault(emptyList())
 
+    /** Top-level `comment`, `created by` and `creation date` (seconds since epoch, 0 when absent). */
+    fun about(bytes: ByteArray): Triple<String, String, Long> = runCatching {
+        val top = Reader(bytes).read() as? Map<*, *> ?: return Triple("", "", 0)
+        Triple(
+            (top["comment"] as? ByteArray)?.let(::String).orEmpty(),
+            (top["created by"] as? ByteArray)?.let(::String).orEmpty(),
+            top["creation date"] as? Long ?: 0,
+        )
+    }.getOrDefault(Triple("", "", 0))
+
     private class Reader(val b: ByteArray) {
         var i = 0
         fun read(): Any = when (val c = b[i].toInt().toChar()) {
