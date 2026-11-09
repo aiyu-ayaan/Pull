@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1-alpha.2](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.1...v0.1.1-alpha.2) (2026-11-09)
+
+### Other changes
+
+* Fix release crash at launch from R8 renaming nav route enum
+
 ## [0.1.1-alpha.1](https://github.com/aiyu-ayaan/Pull/compare/v0.1.0...v0.1.1-alpha.1) (2026-11-09)
 
 ### Features
