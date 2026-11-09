@@ -24,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -48,10 +49,12 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +72,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aiyu.pull.R
+import com.aiyu.pull.data.DownloadEntity
+import com.aiyu.pull.data.Kind
+import com.aiyu.pull.data.Status
 import com.aiyu.pull.ui.components.FileKind
 import com.aiyu.pull.ui.components.ShapeIcon
 import com.aiyu.pull.ui.components.tone
@@ -100,7 +106,13 @@ data class AddRequest(
  * connections), a torrent or magnet (file picker, sequential), or a video page (quality picker, Best by default).
  */
 @Composable
-fun AddDownloadSheet(request: AddRequest, vm: AddViewModel, onDismiss: () -> Unit, onAdded: (Long) -> Unit) {
+fun AddDownloadSheet(
+    request: AddRequest,
+    vm: AddViewModel,
+    onDismiss: () -> Unit,
+    onAdded: (Long) -> Unit,
+    onOpenExisting: ((Long) -> Unit)? = null,
+) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -114,7 +126,11 @@ fun AddDownloadSheet(request: AddRequest, vm: AddViewModel, onDismiss: () -> Uni
     }
 
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val add: (suspend () -> Long) -> Unit = { block ->
+    // Same link or torrent already in the list: ask before downloading it a second time.
+    var duplicate by remember { mutableStateOf<DownloadEntity?>(null) }
+    LaunchedEffect(state) { duplicate = vm.duplicateOf(state, url.trim()) }
+    var pending by remember { mutableStateOf<(suspend () -> Long)?>(null) }
+    val start: (suspend () -> Long) -> Unit = { block ->
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -123,6 +139,16 @@ fun AddDownloadSheet(request: AddRequest, vm: AddViewModel, onDismiss: () -> Uni
             sheet.hide()
             onAdded(id)
         }
+    }
+    val add: (suspend () -> Long) -> Unit = { block -> if (duplicate != null) pending = block else start(block) }
+    val dup = duplicate
+    pending?.let { block ->
+        if (dup != null) DuplicateDialog(
+            existing = dup,
+            onAgain = { pending = null; start(block) },
+            onShow = onOpenExisting?.let { open -> { pending = null; scope.launch { sheet.hide(); open(dup.id) } } },
+            onDismiss = { pending = null },
+        )
     }
 
     ModalBottomSheet(onDismissRequest = { vm.reset(); onDismiss() }, sheetState = sheet, modifier = Modifier.clickHaptics()) {
@@ -159,6 +185,46 @@ fun AddDownloadSheet(request: AddRequest, vm: AddViewModel, onDismiss: () -> Uni
             }
         }
     }
+}
+
+@Composable
+private fun DuplicateDialog(existing: DownloadEntity, onAgain: () -> Unit, onShow: (() -> Unit)?, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    // libtorrent runs one copy of a torrent at a time: an unfinished one can only be shown, not started twice.
+    val canRepeat = existing.kind != Kind.TORRENT || existing.status == Status.COMPLETED
+    val added = android.text.format.DateUtils.getRelativeTimeSpanString(existing.createdAt).toString()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.ContentCopy, null) },
+        title = { Text(stringResource(R.string.dup_title)) },
+        text = {
+            Text(
+                buildString {
+                    append(context.getString(R.string.dup_body, existing.fileName, added, context.getString(statusLabel(existing.status)).lowercase()))
+                    append("\n\n")
+                    append(context.getString(if (!canRepeat) R.string.dup_torrent_running else if (existing.kind == Kind.TORRENT) R.string.dup_torrent_again else R.string.dup_numbered))
+                },
+            )
+        },
+        confirmButton = {
+            if (canRepeat) TextButton(onClick = onAgain) { Text(stringResource(R.string.dup_again)) }
+            else if (onShow != null) TextButton(onClick = onShow) { Text(stringResource(R.string.dup_show)) }
+        },
+        dismissButton = {
+            Row {
+                if (canRepeat && onShow != null) TextButton(onClick = onShow) { Text(stringResource(R.string.dup_show)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            }
+        },
+    )
+}
+
+private fun statusLabel(s: Status) = when (s) {
+    Status.QUEUED -> R.string.status_queued
+    Status.RUNNING -> R.string.dup_status_running
+    Status.PAUSED -> R.string.status_paused
+    Status.COMPLETED -> R.string.status_completed
+    Status.FAILED -> R.string.status_failed
 }
 
 @Composable

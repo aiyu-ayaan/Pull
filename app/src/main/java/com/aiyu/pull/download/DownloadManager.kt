@@ -194,6 +194,9 @@ class DownloadManager @Inject constructor(
         running[id]?.transfer?.updateFiles(if (all) emptySet() else selected)
     }
 
+    suspend fun findDuplicate(urls: List<String>, infoHash: String?): DownloadEntity? =
+        dao.findDuplicate(urls.filter { it.isNotBlank() }.distinct(), infoHash?.lowercase())
+
     /** A .torrent behind an HTTP link (capped at 20 MB, real ones are far smaller). */
     suspend fun fetchTorrent(url: String, headers: Map<String, String> = emptyMap()): ByteArray = withContext(Dispatchers.IO) {
         val req = okhttp3.Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()

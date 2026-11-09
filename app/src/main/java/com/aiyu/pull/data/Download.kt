@@ -134,6 +134,13 @@ interface DownloadDao {
     @Query("UPDATE downloads SET torrentPath = :path, infoHash = :infoHash, fileName = :name, totalBytes = :total WHERE id = :id")
     suspend fun setTorrent(id: Long, path: String, infoHash: String, name: String, total: Long)
 
+    /** The newest row for the same link, server link or torrent, to warn before downloading it twice. */
+    @Query(
+        """SELECT * FROM downloads WHERE url IN (:urls) OR finalUrl IN (:urls) OR (:infoHash IS NOT NULL AND infoHash = :infoHash)
+        ORDER BY createdAt DESC LIMIT 1"""
+    )
+    suspend fun findDuplicate(urls: List<String>, infoHash: String?): DownloadEntity?
+
     @Query("UPDATE downloads SET fileName = :name WHERE id = :id")
     suspend fun setName(id: Long, name: String)
 

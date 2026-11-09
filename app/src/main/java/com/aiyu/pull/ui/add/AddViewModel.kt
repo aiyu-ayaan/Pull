@@ -122,6 +122,17 @@ class AddViewModel @Inject constructor(
     suspend fun addVideo(url: String, title: String, format: String, args: String?, headers: Map<String, String>, size: Long, start: Boolean): Long =
         manager.addVideo(url, title, format, args, headers, size, start).also { reset() }
 
+    /** An earlier download of what [a] points at, if any. */
+    suspend fun duplicateOf(a: Analysis, input: String): com.aiyu.pull.data.DownloadEntity? = when (a) {
+        is Analysis.FileLink -> manager.findDuplicate(listOf(input, a.info.finalUrl), null)
+        is Analysis.Video -> manager.findDuplicate(listOf(input), null)
+        is Analysis.Torrent -> {
+            val hash = a.meta?.infoHash ?: a.magnet?.let { Regex("""btih:([0-9a-fA-F]{40})""").find(it)?.groupValues?.get(1) }
+            if (hash != null) manager.findDuplicate(emptyList(), hash) else null
+        }
+        else -> null
+    }
+
     fun reset() {
         job?.cancel()
         analyzed = null

@@ -187,7 +187,10 @@ fun PullAppShell(event: AppEvent?, onEventHandled: () -> Unit) {
     }
 
     adding?.let { request ->
-        AddDownloadSheet(request = request, vm = hiltViewModel(), onDismiss = { adding = null }, onAdded = { adding = null })
+        AddDownloadSheet(
+            request = request, vm = hiltViewModel(), onDismiss = { adding = null }, onAdded = { adding = null },
+            onOpenExisting = { id -> adding = null; nav.navigate(DetailsRoute(id)) { launchSingleTop = true } },
+        )
     }
 }
 
