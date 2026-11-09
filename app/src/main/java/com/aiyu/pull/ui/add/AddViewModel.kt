@@ -87,6 +87,7 @@ class AddViewModel @Inject constructor(
             } catch (e: DownloadException) {
                 Analysis.Failed(if (e.kind == ErrorKind.LINK_EXPIRED) context.getString(R.string.probe_expired, e.httpCode) else e.message.orEmpty())
             } catch (e: Throwable) {
+                android.util.Log.w("Pull", "analyze failed for $key", e)
                 Analysis.Failed(e.message?.lines()?.lastOrNull { it.isNotBlank() }?.substringAfter("ERROR: ") ?: context.getString(R.string.probe_failed))
             }
         }
@@ -102,6 +103,7 @@ class AddViewModel @Inject constructor(
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Throwable) {
+                android.util.Log.w("Pull", "video search failed for $url", e)
                 Analysis.Failed(e.message?.lines()?.lastOrNull { it.contains("ERROR") }?.substringAfter("ERROR: ") ?: context.getString(R.string.analyze_no_video))
             }
         }
