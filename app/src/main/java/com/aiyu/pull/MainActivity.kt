@@ -1,7 +1,9 @@
 package com.aiyu.pull
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,11 +17,13 @@ import com.aiyu.pull.ui.add.AddRequest
 import com.aiyu.pull.ui.add.copyTorrent
 import com.aiyu.pull.ui.navigation.AppEvent
 import com.aiyu.pull.ui.navigation.PullAppShell
-import com.aiyu.pull.ui.navigation.firstUrl
 import com.aiyu.pull.ui.settings.SettingsViewModel
 import com.aiyu.pull.ui.theme.PullTheme
 import com.aiyu.pull.ui.theme.WithClickHaptics
 import dagger.hilt.android.AndroidEntryPoint
+
+/** `drawable/splash_mark` runs 960ms from launch; onCreate is ~200ms in, so the first frame waits the rest. */
+private const val SPLASH_MS = 760L
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -30,7 +34,13 @@ class MainActivity : ComponentActivity() {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         // Splash stays until settings load, so the first frame already has the right theme.
-        splash.setKeepOnScreenCondition { settingsVm.settings.value == null }
+        // Android 12+ also lets drawable/splash_mark finish on a fresh launch.
+        val holdUntil = if (savedInstanceState == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            SystemClock.uptimeMillis() + SPLASH_MS
+        } else 0L
+        splash.setKeepOnScreenCondition {
+            settingsVm.settings.value == null || SystemClock.uptimeMillis() < holdUntil
+        }
         enableEdgeToEdge()
         // A recreated activity (rotation, process death) already handled its launch intent.
         if (savedInstanceState == null) handle(intent)
@@ -55,7 +65,6 @@ class MainActivity : ComponentActivity() {
         val id = intent.getLongExtra(EXTRA_DOWNLOAD_ID, -1)
         when {
             id >= 0 -> event = AppEvent.OpenDownload(id)
-            intent.action == Intent.ACTION_SEND -> (firstUrl(intent.getStringExtra(Intent.EXTRA_TEXT)) ?: intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.startsWith("magnet:", true) })?.let { event = AppEvent.Add(AddRequest(it)) }
             intent.action == Intent.ACTION_VIEW && intent.data?.scheme.equals("magnet", true) ->
                 event = AppEvent.Add(AddRequest(intent.dataString.orEmpty()))
             intent.action == Intent.ACTION_VIEW && intent.data != null ->

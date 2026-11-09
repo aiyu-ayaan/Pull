@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+: the system splash plays the animated comet. Duration matches drawable/splash_mark. -->
+    <style name="Theme.Pull.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/canvas</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
+        <item name="windowSplashScreenAnimationDuration">960</item>
+        <item name="postSplashScreenTheme">@style/Theme.Pull</item>
+    </style>
+</resources>

@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Status bar icon: white comet, alpha only. Comet geometry source: development/brand/logo/comet.py (local frame, rotated 45 degrees). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M11,3h2a1,1 0,0 1,1 1v7h3l-5,5.5L7,11h3V4a1,1 0,0 1,1 -1zM5,18h14v2H5z" />
+    <group
+        android:translateX="12"
+        android:translateY="12"
+        android:rotation="45"
+        android:scaleX="0.1"
+        android:scaleY="0.1">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M38,-44a44,44 0 1 1 0,88a44,44 0 1 1 0,-88Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M-90,-12H-30a12,12 0 0 1 0,24H-90a12,12 0 0 1 0,-24Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M-48,-44H-12a10,10 0 0 1 0,20H-48a10,10 0 0 1 0,-20Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M-48,24H-12a10,10 0 0 1 0,20H-48a10,10 0 0 1 0,-20Z" />
+    </group>
 </vector>

@@ -50,24 +50,18 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/x-bittorrent" />
             </intent-filter>
-            <!-- Share a link to Pull from any app. -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
         </activity>
 
-        <!-- Second share target: starts the download straight away, without opening Pull. -->
+        <!-- Share target: only the add bottom sheet, floating over the app the link was shared from. -->
         <activity
             android:name=".QuickDownloadActivity"
             android:exported="true"
-            android:label="@string/quick_label"
+            android:label="@string/share_label"
             android:icon="@mipmap/ic_launcher"
             android:excludeFromRecents="true"
-            android:noHistory="true"
             android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Pull.Sheet">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

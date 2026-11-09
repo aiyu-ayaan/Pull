@@ -8,7 +8,16 @@
 
     <style name="Theme.Pull.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/canvas</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_static</item>
         <item name="postSplashScreenTheme">@style/Theme.Pull</item>
+    </style>
+    <!-- See-through window: the share sheet shows the caller's app behind the bottom sheet. -->
+    <style name="Theme.Pull.Sheet" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

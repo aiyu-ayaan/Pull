@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher foreground and monochrome layer: the comet inside the 66dp safe zone. Comet geometry source: development/brand/logo/comet.py (local frame, rotated 45 degrees). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="@color/brand_container"
-        android:pathData="M50,30h8a2,2 0,0 1,2 2v20h8.2a1.5,1.5 0,0 1,1.1 2.5l-14.2,15a1.5,1.5 0,0 1,-2.2 0l-14.2,-15a1.5,1.5 0,0 1,1.1 -2.5H48V32a2,2 0,0 1,2 -2z" />
-    <path
-        android:fillColor="@color/brand_container"
-        android:pathData="M34,74h40a3,3 0,0 1,0 6H34a3,3 0,0 1,0 -6z" />
+    <group
+        android:translateX="54"
+        android:translateY="54"
+        android:rotation="45"
+        android:scaleX="0.3"
+        android:scaleY="0.3">
+        <path android:fillColor="@color/brand_container" android:pathData="M38,-44a44,44 0 1 1 0,88a44,44 0 1 1 0,-88Z" />
+        <path android:fillColor="@color/brand_container" android:pathData="M-90,-12H-30a12,12 0 0 1 0,24H-90a12,12 0 0 1 0,-24Z" />
+        <path android:fillColor="@color/brand_container" android:pathData="M-48,-44H-12a10,10 0 0 1 0,20H-48a10,10 0 0 1 0,-20Z" />
+        <path android:fillColor="@color/brand_container" android:pathData="M-48,24H-12a10,10 0 0 1 0,20H-48a10,10 0 0 1 0,-20Z" />
+    </group>
 </vector>

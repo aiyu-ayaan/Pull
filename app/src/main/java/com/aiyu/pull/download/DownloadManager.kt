@@ -207,60 +207,6 @@ class DownloadManager @Inject constructor(
         }
     }
 
-    enum class QuickResult { FILE, TORRENT, VIDEO, NOTHING, FAILED }
-
-    /**
-     * Share-sheet "Quick download": works out what [input] is and starts it with the default choices (all torrent
-     * files, best video quality), without the add popup. [done] runs on the main thread.
-     */
-    fun quickAdd(input: String, done: (QuickResult, String?) -> Unit) = scope.launch {
-        val (result, detail) = try {
-            val s = settings.current()
-            when {
-                input.startsWith("magnet:", ignoreCase = true) -> {
-                    addTorrent(null, input, emptySet(), s.torrentSequential, true)
-                    QuickResult.TORRENT to null
-                }
-                com.aiyu.pull.video.VideoEngine.isVideoSite(input) -> quickVideo(input, s.video)
-                else -> {
-                    val info = probe(input)
-                    when {
-                        info.mimeType == "application/x-bittorrent" || info.fileName?.endsWith(".torrent", true) == true -> {
-                            val meta = torrents.get().parse(fetchTorrent(info.finalUrl))
-                            addTorrent(meta, null, emptySet(), s.torrentSequential, true)
-                            QuickResult.TORRENT to meta.name
-                        }
-                        // A page, not a file: yt-dlp may still find a video on it.
-                        info.mimeType == "text/html" -> runCatching {
-                            val meta = videos.get().info(input)
-                            val (format, args) = com.aiyu.pull.video.VideoOptions.build(s.video)
-                            addVideo(input, meta.title, format, args)
-                            QuickResult.VIDEO to meta.title
-                        }.getOrElse { QuickResult.NOTHING to null }
-                        else -> {
-                            add(input, info.fileName)
-                            QuickResult.FILE to info.fileName
-                        }
-                    }
-                }
-            }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (e: Throwable) {
-            Log.w(TAG, "Quick download failed", e)
-            QuickResult.FAILED to e.message?.lines()?.lastOrNull { it.isNotBlank() }
-        }
-        withContext(Dispatchers.Main) { done(result, detail) }
-    }
-
-    /** Starts at once under a placeholder name; the real title replaces it when yt-dlp has read the page. */
-    private suspend fun quickVideo(url: String, prefs: com.aiyu.pull.video.VideoChoice): Pair<QuickResult, String?> {
-        val (format, args) = com.aiyu.pull.video.VideoOptions.build(prefs)
-        val id = addVideo(url, runCatching { java.net.URI(url).host }.getOrNull() ?: url, format, args)
-        scope.launch { runCatching { videos.get().info(url).title }.onSuccess { dao.setName(id, it) } }
-        return QuickResult.VIDEO to null
-    }
-
     /** Torrent options from the details screen: saved, then applied to the running torrent if any. */
     fun torrentCommand(id: Long, c: TorrentCommand) = scope.launch {
         when (c) {

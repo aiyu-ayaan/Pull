@@ -1,47 +1,57 @@
 package com.aiyu.pull
 
-import androidx.activity.ComponentActivity
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
-import com.aiyu.pull.download.DownloadManager
-import com.aiyu.pull.download.DownloadManager.QuickResult
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aiyu.pull.ui.add.AddDownloadSheet
+import com.aiyu.pull.ui.add.AddRequest
 import com.aiyu.pull.ui.navigation.firstUrl
+import com.aiyu.pull.ui.settings.SettingsViewModel
+import com.aiyu.pull.ui.theme.PullTheme
+import com.aiyu.pull.ui.theme.WithClickHaptics
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
 
 /**
- * "Quick download" in the share sheet: no window, no questions. Pull works out whether the link is a file, a
- * torrent or a video page, starts it with the default choices and says so in a toast. Progress then shows in the
- * download notification and the app.
+ * The share-sheet target. It has no window of its own: only the add bottom sheet (file, torrent or video, with all
+ * its options) floats over the app the link was shared from, and closing it returns there. Pull itself never opens.
  */
 @AndroidEntryPoint
 class QuickDownloadActivity : ComponentActivity() {
-    @Inject lateinit var manager: DownloadManager
+    private val settingsVm: SettingsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val text = when (intent.action) {
-            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
-            else -> intent.dataString
-        }
+        enableEdgeToEdge()
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
         val link = text?.trim()?.takeIf { it.startsWith("magnet:", ignoreCase = true) } ?: firstUrl(text)
         if (link == null) {
-            Toast.makeText(this, R.string.quick_no_link, Toast.LENGTH_SHORT).show()
-        } else {
-            val app = applicationContext
-            Toast.makeText(app, R.string.quick_adding, Toast.LENGTH_SHORT).show()
-            manager.quickAdd(link) { result, detail ->
-                val msg = when (result) {
-                    QuickResult.FILE -> app.getString(R.string.quick_file, detail ?: link)
-                    QuickResult.TORRENT -> app.getString(R.string.quick_torrent)
-                    QuickResult.VIDEO -> app.getString(R.string.quick_video)
-                    QuickResult.NOTHING -> app.getString(R.string.quick_nothing)
-                    QuickResult.FAILED -> app.getString(R.string.quick_failed, detail ?: "")
+            finish()
+            return
+        }
+        setContent {
+            val settings by settingsVm.settings.collectAsStateWithLifecycle()
+            val s = settings ?: return@setContent
+            PullTheme(s.themeMode, s.dynamicColor) {
+                WithClickHaptics {
+                    AddDownloadSheet(
+                        request = AddRequest(link),
+                        vm = hiltViewModel(),
+                        onDismiss = { finish() },
+                        onAdded = { finish() },
+                        // Only now does the full app open: the user asked to see the earlier download.
+                        onOpenExisting = { id ->
+                            startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_DOWNLOAD_ID, id))
+                            finish()
+                        },
+                    )
                 }
-                Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
             }
         }
-        finish()
     }
 }

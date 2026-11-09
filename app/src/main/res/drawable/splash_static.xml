@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash icon before Android 12 (no animation there). Comet geometry source: development/brand/logo/comet.py (local frame, rotated 45 degrees). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="54"
+        android:translateY="54"
+        android:rotation="45"
+        android:scaleX="0.32"
+        android:scaleY="0.32">
+        <path android:fillColor="@color/splash_mark" android:pathData="M38,-44a44,44 0 1 1 0,88a44,44 0 1 1 0,-88Z" />
+        <path android:fillColor="@color/splash_mark" android:pathData="M-90,-12H-30a12,12 0 0 1 0,24H-90a12,12 0 0 1 0,-24Z" />
+        <path android:fillColor="@color/splash_mark" android:pathData="M-48,-44H-12a10,10 0 0 1 0,20H-48a10,10 0 0 1 0,-20Z" />
+        <path android:fillColor="@color/splash_mark" android:pathData="M-48,24H-12a10,10 0 0 1 0,20H-48a10,10 0 0 1 0,-20Z" />
+    </group>
+</vector>
