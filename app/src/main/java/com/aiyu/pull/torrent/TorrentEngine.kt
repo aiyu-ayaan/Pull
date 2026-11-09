@@ -146,7 +146,7 @@ private class TorrentTransfer(
         try {
             while (true) {
                 currentCoroutineContext().ensureActive()
-                val st = h.status()
+                val st = h.status(TorrentHandle.QUERY_PIECES)
                 publishLive(h, ti, st, e.url)
                 if (st.totalWanted() > 0 && st.totalWantedDone() >= st.totalWanted() &&
                     st.state() != TorrentStatus.State.CHECKING_FILES && st.state() != TorrentStatus.State.CHECKING_RESUME_DATA

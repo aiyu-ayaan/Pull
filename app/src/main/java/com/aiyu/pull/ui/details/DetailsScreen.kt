@@ -3,6 +3,7 @@ package com.aiyu.pull.ui.details
 import android.content.ClipData
 import android.text.format.DateUtils
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Delete
@@ -71,6 +74,7 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -79,10 +83,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aiyu.pull.R
+import com.aiyu.pull.data.Kind
 import com.aiyu.pull.data.Status
 import com.aiyu.pull.engine.ErrorKind
 import com.aiyu.pull.engine.SegmentProgress
 import com.aiyu.pull.ui.components.FileKind
+import com.aiyu.pull.ui.components.PieceMap
 import com.aiyu.pull.ui.components.SegmentMap
 import com.aiyu.pull.ui.components.ShapeIcon
 import com.aiyu.pull.ui.components.SpeedGraph
@@ -91,6 +97,8 @@ import com.aiyu.pull.ui.components.readableGutter
 import com.aiyu.pull.ui.components.rememberGlide
 import com.aiyu.pull.ui.components.shareFile
 import com.aiyu.pull.ui.components.tone
+import com.aiyu.pull.ui.add.PickFile
+import com.aiyu.pull.ui.add.TorrentFilesSheet
 import com.aiyu.pull.ui.downloads.DownloadView
 import com.aiyu.pull.ui.downloads.DownloadsViewModel
 import com.aiyu.pull.ui.formatBytes
@@ -99,6 +107,7 @@ import com.aiyu.pull.ui.formatSpeed
 import com.aiyu.pull.ui.speakSpeed
 import com.aiyu.pull.ui.theme.Dimens
 import com.aiyu.pull.ui.theme.NumberTextStyle
+import com.aiyu.pull.video.VideoEngine
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -121,6 +130,7 @@ fun DetailsScreen(
     val scope = rememberCoroutineScope()
     var askDelete by rememberSaveable { mutableStateOf(false) }
     var askLink by rememberSaveable { mutableStateOf(false) }
+    var pickFiles by rememberSaveable { mutableStateOf(false) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     val e = entity
@@ -179,7 +189,23 @@ fun DetailsScreen(
                 )
             }
             if (e.status != Status.COMPLETED) item(key = "stats") { Stats(view) }
-            if (e.status != Status.COMPLETED && view.total > 0) item(key = "map") { MapCard(view) }
+            when (e.kind) {
+                Kind.HTTP -> if (e.status != Status.COMPLETED && view.total > 0) item(key = "map") { MapCard(view) }
+                Kind.TORRENT -> {
+                    val pieces = view.live?.torrent?.pieces
+                    if (pieces != null && pieces.isNotEmpty() && e.status != Status.COMPLETED) item(key = "pieces") {
+                        Card(stringResource(R.string.details_pieces)) {
+                            PieceMap(pieces, false)
+                            Text(
+                                stringResource(R.string.details_pieces_hint),
+                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    item(key = "files") { FilesCard(view, onSelect = { pickFiles = true }) }
+                }
+                Kind.VIDEO -> Unit
+            }
             if (view.live != null) item(key = "graph") {
                 Card(stringResource(R.string.details_speed_graph)) {
                     SpeedGraph(view.live.history)
@@ -218,6 +244,16 @@ fun DetailsScreen(
                 TextButton(onClick = { askDelete = false; vm.delete(id, withFile); onBack?.invoke() }) { Text(stringResource(R.string.action_delete)) }
             },
             dismissButton = { TextButton(onClick = { askDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+    if (pickFiles && e != null) {
+        val files = torrentPickFiles(e, live[e.id], vm)
+        TorrentFilesSheet(
+            name = e.fileName,
+            files = files,
+            selected = selectedSet(e.selectedFiles, files.size),
+            onDismiss = { pickFiles = false },
+            onApply = { pickFiles = false; vm.setTorrentFiles(id, it, files.size) },
         )
     }
     if (askLink) {
@@ -291,12 +327,26 @@ private fun Hero(view: DownloadView) {
             }
             Spacer(Modifier.height(Dimens.md))
             Text(statusText(view), style = MaterialTheme.typography.labelLarge, color = c.onSurfaceVariant)
+            if (view.entity.kind == Kind.TORRENT) {
+                Spacer(Modifier.height(Dimens.lg))
+                TorrentStages(torrentStage(view))
+            }
         }
     }
 }
 
 @Composable
 private fun statusText(view: DownloadView): String = when (view.entity.status) {
+    Status.RUNNING if view.entity.kind == Kind.TORRENT -> {
+        val t = view.live?.torrent
+        when (t?.state) {
+            null -> stringResource(R.string.status_connecting)
+            "metadata", "downloading_metadata" -> stringResource(R.string.torrent_state_metadata)
+            "checking_files", "checking_resume_data" -> stringResource(R.string.torrent_state_checking)
+            else -> pluralStringResource(R.plurals.torrent_state_downloading, t.peers, t.peers)
+        }
+    }
+    Status.RUNNING if view.entity.kind == Kind.VIDEO -> stringResource(R.string.video_state_downloading)
     Status.RUNNING -> {
         val active = view.live?.segments?.count { it.active } ?: 0
         if (active == 0) stringResource(R.string.status_connecting) else stringResource(R.string.status_receiving, active)
@@ -413,9 +463,22 @@ private fun Stats(view: DownloadView) {
     val speed by rememberGlide(view.speed)
     val avg = if (e.activeMillis > 1000) e.downloadedBytes * 1000 / e.activeMillis else 0
     val connections = view.live?.segments?.count { it.active } ?: 0
+    val t = view.live?.torrent
     val tiles = buildList {
         add(Triple(R.string.stat_rate, if (view.running) formatSpeed(speed) else "—", speakSpeed(view.speed)))
         add(Triple(R.string.stat_left, view.eta?.let(::formatDuration) ?: "—", null))
+        if (e.kind == Kind.TORRENT) {
+            add(Triple(R.string.stat_peers, t?.let { "${it.peers} / ${it.seeds}" } ?: "—", null))
+            add(Triple(R.string.stat_upload, t?.let { formatSpeed(it.uploadBytesPerSecond) } ?: "—", null))
+            add(Triple(R.string.stat_uploaded, t?.let { formatBytes(it.uploaded) } ?: "—", null))
+            add(Triple(R.string.stat_elapsed, formatDuration(e.activeMillis / 1000), null))
+            return@buildList
+        }
+        if (e.kind == Kind.VIDEO) {
+            add(Triple(R.string.stat_avg, if (avg > 0) formatSpeed(avg) else "—", null))
+            add(Triple(R.string.stat_elapsed, formatDuration(e.activeMillis / 1000), null))
+            return@buildList
+        }
         add(Triple(R.string.stat_connections, if (view.running) "$connections / ${e.maxConnections}" else "${e.maxConnections}", null))
         add(Triple(R.string.stat_avg, if (avg > 0) formatSpeed(avg) else "—", null))
         add(Triple(R.string.stat_elapsed, formatDuration(e.activeMillis / 1000), null))
@@ -500,10 +563,14 @@ private fun Connections(segs: List<SegmentProgress>) {
 @Composable
 private fun Info(view: DownloadView, onCopy: (String, String) -> Unit) {
     val e = view.entity
+    val context = LocalContext.current
     val rows = listOfNotNull(
-        stringResource(R.string.info_url) to e.url,
+        stringResource(if (e.kind == Kind.TORRENT) R.string.info_magnet else R.string.info_url) to e.url,
+        e.infoHash?.let { stringResource(R.string.info_hash) to it },
+        e.videoFormat?.let { stringResource(R.string.info_format) to videoFormatLabel(it) },
+        e.extraArgs?.let { stringResource(R.string.info_command) to it },
         e.finalUrl?.takeIf { it != e.url }?.let { stringResource(R.string.info_final_url) to it },
-        e.pageUrl?.let { stringResource(R.string.info_page) to it },
+        e.pageUrl?.takeIf { it != e.url }?.let { stringResource(R.string.info_page) to it },
         stringResource(R.string.info_saved_to) to "Download/Pull/${e.fileName}",
         e.mimeType?.let { stringResource(R.string.info_type) to it },
         e.etag?.let { "ETag" to it },
@@ -519,8 +586,11 @@ private fun Info(view: DownloadView, onCopy: (String, String) -> Unit) {
                     Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(value, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
-                if (value.startsWith("http")) IconButton(onClick = { onCopy(label, value) }) {
+                if (value.startsWith("http") || value.startsWith("magnet:") || value == e.infoHash) IconButton(onClick = { onCopy(label, value) }) {
                     Icon(Icons.Rounded.ContentCopy, stringResource(R.string.cd_copy, label))
+                }
+                if (value.startsWith("magnet:")) IconButton(onClick = { shareText(context, value) }) {
+                    Icon(Icons.Rounded.Share, stringResource(R.string.cd_share, label))
                 }
             }
         }
@@ -540,4 +610,102 @@ private fun Card(title: String, content: @Composable ColumnScope.() -> Unit) {
 private fun clipboardCopy(context: android.content.Context, label: String, value: String) {
     val cm = context.getSystemService(android.content.ClipboardManager::class.java)
     cm.setPrimaryClip(ClipData.newPlainText(label, value))
+}
+
+/** Torrent files with live progress while running, else read from the stored .torrent. */
+@Composable
+private fun torrentPickFiles(e: com.aiyu.pull.data.DownloadEntity, live: com.aiyu.pull.download.LiveStats?, vm: DownloadsViewModel): List<PickFile> {
+    val stored = remember(e.torrentPath) { vm.torrentFiles(e) }
+    val running = live?.torrent?.files.orEmpty()
+    return if (running.isNotEmpty()) running.mapIndexed { i, f -> PickFile(i, f.path, f.size, f.done) }
+    else stored.mapIndexed { i, (path, size) -> PickFile(i, path, size) }
+}
+
+/** Saved selection: empty means every file. */
+private fun selectedSet(saved: String, count: Int): Set<Int> =
+    saved.split(',').mapNotNull(String::toIntOrNull).toSet().ifEmpty { (0 until count).toSet() }
+
+@Composable
+private fun FilesCard(view: DownloadView, onSelect: () -> Unit) {
+    val e = view.entity
+    val files = view.live?.torrent?.files
+    Card(stringResource(R.string.torrent_files)) {
+        if (files != null && files.isNotEmpty()) {
+            val wanted = files.filter { it.wanted }
+            Text(
+                stringResource(R.string.files_selected, wanted.size, files.size, formatBytes(wanted.sumOf { it.size })),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        } else if (e.torrentPath == null) {
+            Text(stringResource(R.string.torrent_fetching), style = MaterialTheme.typography.bodyMedium)
+        }
+        FilledTonalButton(onClick = onSelect, enabled = e.torrentPath != null, shapes = ButtonDefaults.shapes()) {
+            Icon(Icons.Rounded.Checklist, null, Modifier.size(ButtonDefaults.IconSize)); Spacer(Modifier.width(Dimens.sm))
+            Text(stringResource(R.string.files_title))
+        }
+    }
+}
+
+@Composable
+private fun videoFormatLabel(format: String): String = when {
+    format == VideoEngine.BEST -> stringResource(R.string.quality_best)
+    format == VideoEngine.AUDIO_ONLY -> stringResource(R.string.quality_audio)
+    else -> Regex("""height<=(\d+)""").find(format)?.let { "${it.groupValues[1]}p" } ?: format
+}
+
+private fun shareText(context: android.content.Context, text: String) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, text)
+    context.startActivity(android.content.Intent.createChooser(send, null))
+}
+
+/** 0 metadata, 1 checking, 2 downloading, 3 done. */
+private fun torrentStage(view: DownloadView): Int {
+    val e = view.entity
+    if (e.status == Status.COMPLETED) return 3
+    return when (view.live?.torrent?.state) {
+        "metadata", "downloading_metadata" -> 0
+        "checking_files", "checking_resume_data" -> 1
+        "downloading" -> 2
+        "finished", "seeding" -> 3
+        else -> if (e.torrentPath == null) 0 else 2
+    }
+}
+
+/** The steps a torrent goes through, so a long metadata fetch or re-check does not look stuck. */
+@Composable
+private fun TorrentStages(current: Int) {
+    val c = MaterialTheme.colorScheme
+    val labels = listOf(R.string.stage_metadata, R.string.stage_checking, R.string.stage_downloading, R.string.stage_done)
+    val done = current >= labels.lastIndex
+    Row(Modifier.fillMaxWidth()) {
+        labels.forEachIndexed { i, label ->
+            val reached = i < current || done
+            val now = i == current && !done
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f).height(2.dp).then(if (i > 0) Modifier.background(if (i <= current) c.primary else c.outlineVariant) else Modifier))
+                    Surface(
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = if (reached) c.primary else if (now) c.primaryContainer else c.surfaceContainerHighest,
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            when {
+                                reached -> Icon(Icons.Rounded.Check, null, tint = c.onPrimary, modifier = Modifier.size(16.dp))
+                                now -> LoadingIndicator(Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                    Box(Modifier.weight(1f).height(2.dp).then(if (i < labels.lastIndex) Modifier.background(if (i < current) c.primary else c.outlineVariant) else Modifier))
+                }
+                Spacer(Modifier.height(Dimens.xs))
+                Text(
+                    stringResource(label),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (now) c.primary else c.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
 }

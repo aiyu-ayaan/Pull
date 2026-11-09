@@ -195,4 +195,25 @@
     <string name="notif_completed">Download complete · %s</string>
     <string name="notif_failed">Download failed</string>
     <string name="notif_link_expired">Link expired · tap to get a new one</string>
+    <string name="details_pieces">Pieces</string>
+    <string name="details_pieces_hint">Filled: pieces on disk.</string>
+    <string name="stat_peers">Peers / seeds</string>
+    <string name="stat_upload">Upload rate</string>
+    <string name="stat_uploaded">Uploaded</string>
+    <string name="torrent_state_metadata">Getting torrent info from peers…</string>
+    <string name="torrent_state_checking">Checking files on disk…</string>
+    <plurals name="torrent_state_downloading">
+        <item quantity="one">Downloading from %d peer</item>
+        <item quantity="other">Downloading from %d peers</item>
+    </plurals>
+    <string name="video_state_downloading">Downloading video…</string>
+    <string name="info_magnet">Magnet link</string>
+    <string name="info_hash">Info hash</string>
+    <string name="info_format">Format</string>
+    <string name="info_command">Extra yt-dlp arguments</string>
+    <string name="cd_share">Share %s</string>
+    <string name="stage_metadata">Info</string>
+    <string name="stage_checking">Checking</string>
+    <string name="stage_downloading">Downloading</string>
+    <string name="stage_done">Done</string>
 </resources>

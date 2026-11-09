@@ -101,6 +101,27 @@ fun SegmentMap(
     }
 }
 
+/** Torrent pieces as one bar: each slot is a bucket of pieces, filled once every piece in it is on disk. */
+@Composable
+fun PieceMap(pieces: BooleanArray, complete: Boolean, modifier: Modifier = Modifier, height: Dp = 20.dp) {
+    val c = MaterialTheme.colorScheme
+    val have = pieces.count { it }
+    Canvas(
+        modifier.fillMaxWidth().height(height).semantics {
+            contentDescription = "$have of ${pieces.size} piece groups downloaded"
+        },
+    ) {
+        val r = CornerRadius(size.height / 2)
+        val bar = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, r)) }
+        clipPath(bar) {
+            drawRect(if (complete) c.primary else c.secondaryContainer)
+            if (complete || pieces.isEmpty()) return@clipPath
+            val w = size.width / pieces.size
+            pieces.forEachIndexed { i, on -> if (on) drawRect(c.primary, Offset(i * w, 0f), Size(w + 0.5f, size.height)) }
+        }
+    }
+}
+
 /** Speed over the last minute: filled area under a line. Scaled to its own peak so small changes stay visible. */
 @Composable
 fun SpeedGraph(history: List<Long>, modifier: Modifier = Modifier) {
