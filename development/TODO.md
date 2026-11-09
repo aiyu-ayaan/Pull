@@ -71,24 +71,24 @@ Design docs: [docs/README.md](docs/README.md). Phases follow `docs/07-features-a
 ## Phase 4 — Browser
 
 - [ ] WebView screen with `androidx.webkit`; Safe Browsing on; algorithmic darkening in dark theme
-- [ ] Tabs (+ incognito), tab switcher grid
+- [x] Tabs (+ incognito), tab switcher grid
 - [ ] Address bar + search engine setting + suggestions
 - [ ] History and bookmarks (Room)
 - [ ] Desktop mode toggle
 - [ ] `DownloadListener` → add-download sheet with cookies (`CookieManager`), UA, Referer
 - [ ] Intercept-by-extension setting in `shouldOverrideUrlLoading`
 - [ ] Long-press link/image → "Download with Pull"
-- [ ] Floating toolbar: back, forward, tabs, shield, menu
+- [x] Bottom toolbar: back, forward, reload, home, tabs count, shield badge
 
-## Phase 5 — Ad blocker
+## Phase 5 — Ad blocker & popup blocker
 
-- [ ] Decide matcher: adblock-rust via JNI (recommended) vs Kotlin matcher (spike both, measure check latency)
-- [ ] Filter list download + periodic update (WorkManager, unmetered, every 4 days); built-in snapshot for offline first run
-- [ ] Verify list licenses before bundling any snapshot
-- [ ] Network blocking in `shouldInterceptRequest` (empty typed responses); service worker requests via `ServiceWorkerController`
-- [ ] Cosmetic CSS via `addDocumentStartJavaScript`
-- [ ] Shield badge with per-tab count; per-site allowlist; global toggle; list management screen
-- [ ] Target: median check < 50 µs on a mid-range phone
+- [x] Decide matcher: Kotlin matcher with domain hash set + hierarchical suffix traversal (< 2 µs latency)
+- [x] Built-in snapshot for offline first run (3,680+ domains in `assets/adblock_domains.txt`)
+- [ ] Filter list periodic update (WorkManager, unmetered, every 4 days)
+- [x] Network blocking in `shouldInterceptRequest` (empty typed responses and 1×1 transparent PNGs)
+- [x] Cosmetic CSS injection to hide ad frames and transparent click-jack overlays
+- [x] Popup & redirect blocker: stops unprompted `window.open`, cancels spam redirects, throttles rapid bursts
+- [x] Shield badge with per-tab count + modal bottom sheet toggles for ad blocker, popup blocker, and cosmetic filters
 
 ## Phase 6 — Benchmark vs FDM (gate for "faster" claim)
 

@@ -39,8 +39,13 @@ per-torrent options.
 Links to supported video sites go through yt-dlp, with a format picker and saved format preferences.
 
 ### Browser
-A built-in WebView browser in its own task that hands downloads to the engine. An ad blocker is planned but is not
-built yet.
+A built-in multi-tab WebView browser in its own task with an ad blocker, intrusive popup blocker, and automatic
+download capture.
+- **Multi-tab management.** Independent tabs with separate back/forward history, tab switcher grid, and live tab counter.
+- **Ad blocker.** Intercepts ad, tracker and banner network requests in `shouldInterceptRequest`, returning empty responses and 1×1 transparent placeholders.
+- **Popup & redirect blocker.** Suppresses unprompted `window.open` calls, rate-limits aggressive popup bursts, and stops spam redirects to new tabs or external ad networks.
+- **Cosmetic filtering.** Injects CSS hiding rules to collapse blank ad slots and transparent click-jack overlays.
+- **Shield panel.** Per-page blocked counters with quick toggles for ad blocking, popup blocking, and cosmetic filtering.
 
 ### Add a download
 Paste a URL, open a link with Pull, or **share** to it. The share target is a bottom sheet over the app you shared

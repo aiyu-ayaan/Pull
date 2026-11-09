@@ -37,6 +37,24 @@
     <string name="browser_added">Added to Pull</string>
     <string name="browser_address_hint">Search or type URL</string>
     <string name="action_clear">Clear</string>
+    <string name="browser_shield_title">Shield</string>
+    <string name="browser_shield_subtitle">Protection for this page</string>
+    <plurals name="browser_blocked_stat">
+        <item quantity="one">%d ad or popup blocked</item>
+        <item quantity="other">%d ads &amp; popups blocked</item>
+    </plurals>
+    <string name="browser_ad_block">Ad blocker</string>
+    <string name="browser_ad_block_desc">Block ads, banners, and trackers</string>
+    <string name="browser_popup_block">Popup blocker</string>
+    <string name="browser_popup_block_desc">Block intrusive popups and new-tab redirects</string>
+    <string name="browser_cosmetic">Cosmetic filtering</string>
+    <string name="browser_cosmetic_desc">Hide blank ad spaces and click-jack overlays</string>
+    <string name="browser_tabs_title">Tabs</string>
+    <string name="browser_new_tab">New tab</string>
+    <string name="browser_close_all_tabs">Close all tabs</string>
+    <string name="browser_close_tab">Close tab</string>
+    <string name="cd_tabs">Open tabs</string>
+    <string name="cd_shield">Shield settings</string>
     <string name="empty_done_title">No finished downloads yet</string>
     <string name="day_today">Today</string>
     <string name="day_yesterday">Yesterday</string>

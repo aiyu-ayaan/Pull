@@ -52,6 +52,9 @@ data class Settings(
     val updateChannel: UpdateChannel? = null,
     val updateLastChecked: Long = 0,
     val updateSnoozedUntil: Long = 0,
+    val browserAdBlock: Boolean = true,
+    val browserPopupBlock: Boolean = true,
+    val browserCosmetic: Boolean = true,
 )
 
 /** BitTorrent protocol encryption: allow both, require it, or never use it. */
@@ -99,6 +102,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val updateChannel = stringPreferencesKey("update_channel")
         val updateLastChecked = longPreferencesKey("update_last_checked")
         val updateSnoozedUntil = longPreferencesKey("update_snoozed_until")
+        val browserAdBlock = booleanPreferencesKey("browser_ad_block")
+        val browserPopupBlock = booleanPreferencesKey("browser_popup_block")
+        val browserCosmetic = booleanPreferencesKey("browser_cosmetic")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -135,6 +141,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             updateChannel = p[Keys.updateChannel]?.let { runCatching { UpdateChannel.valueOf(it) }.getOrNull() },
             updateLastChecked = p[Keys.updateLastChecked] ?: 0,
             updateSnoozedUntil = p[Keys.updateSnoozedUntil] ?: 0,
+            browserAdBlock = p[Keys.browserAdBlock] ?: true,
+            browserPopupBlock = p[Keys.browserPopupBlock] ?: true,
+            browserCosmetic = p[Keys.browserCosmetic] ?: true,
         )
     }
 
@@ -178,6 +187,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setUpdateLastChecked(at: Long) = set(Keys.updateLastChecked, at)
     suspend fun setUpdateSnoozedUntil(at: Long) = set(Keys.updateSnoozedUntil, at)
     suspend fun setTorrentConnections(n: Int) = set(Keys.torrentConnections, n.coerceIn(20, 500))
+    suspend fun setBrowserAdBlock(on: Boolean) = set(Keys.browserAdBlock, on)
+    suspend fun setBrowserPopupBlock(on: Boolean) = set(Keys.browserPopupBlock, on)
+    suspend fun setBrowserCosmetic(on: Boolean) = set(Keys.browserCosmetic, on)
 
     companion object {
         /** Starter templates; the user edits or deletes them on the Command templates screen. */
