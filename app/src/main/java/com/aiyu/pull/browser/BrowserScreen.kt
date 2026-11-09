@@ -91,7 +91,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
-private const val SEARCH_ENGINE = "https://duckduckgo.com/?q="
+private const val SEARCH_ENGINE = "https://www.google.com/search?q="
 
 /**
  * Tabbed WebView browser with ad blocker, popup blocker, and download capture.

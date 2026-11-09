@@ -31,7 +31,7 @@ class AdBlockerTest {
 
     @Test
     fun allowsLegitimateSites() {
-        assertFalse(adBlocker.isBlocked("https://duckduckgo.com"))
+        assertFalse(adBlocker.isBlocked("https://example.com"))
         assertFalse(adBlocker.isBlocked("https://github.com/aiyu-ayaan/Pull"))
         assertFalse(adBlocker.isBlocked("https://en.wikipedia.org/wiki/Main_Page"))
         assertFalse(adBlocker.isBlocked("https://www.google.com/search?q=kotlin"))
@@ -63,7 +63,7 @@ class AdBlockerTest {
 
     @Test
     fun extractsHostAndPathCorrectly() {
-        assertEquals("duckduckgo.com", adBlocker.extractHost("https://duckduckgo.com/?q=pull"))
+        assertEquals("example.com", adBlocker.extractHost("https://example.com/?q=pull"))
         assertEquals("googleads.g.doubleclick.net", adBlocker.extractHost("https://googleads.g.doubleclick.net:443/pagead/ads"))
         assertEquals("/pagead/ads", adBlocker.extractPath("https://doubleclick.net/pagead/ads?foo=bar"))
         assertEquals("foo=bar", adBlocker.extractQuery("https://doubleclick.net/pagead/ads?foo=bar#hash"))
