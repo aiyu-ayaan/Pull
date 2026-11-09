@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Splash animation: the comet's head shoots in along its path and overshoots, then each trail stretches out
      behind it, middle first, and springs back. Runs 960ms (the first 200ms wait out the launch transition);
-     keep windowSplashScreenAnimationDuration and SPLASH_MS in MainActivity in step.
+     keep windowSplashScreenAnimationDuration (values-v31/themes.xml) and SPLASH_MS in MainActivity in step.
      Geometry source: development/brand/logo/comet.py (local frame, rotated 45 degrees). -->
 <animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt">

@@ -3,6 +3,7 @@ package com.aiyu.pull
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,8 +23,8 @@ import com.aiyu.pull.ui.theme.PullTheme
 import com.aiyu.pull.ui.theme.WithClickHaptics
 import dagger.hilt.android.AndroidEntryPoint
 
-/** `drawable/splash_mark` runs 960ms from launch; onCreate is ~200ms in, so the first frame waits the rest. */
-private const val SPLASH_MS = 760L
+/** `drawable/splash_mark` runs 960ms; the system starts it with the process, so hold the first frame until then. */
+private const val SPLASH_MS = 960L
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -36,7 +37,7 @@ class MainActivity : ComponentActivity() {
         // Splash stays until settings load, so the first frame already has the right theme.
         // Android 12+ also lets drawable/splash_mark finish on a fresh launch.
         val holdUntil = if (savedInstanceState == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            SystemClock.uptimeMillis() + SPLASH_MS
+            Process.getStartUptimeMillis() + SPLASH_MS
         } else 0L
         splash.setKeepOnScreenCondition {
             settingsVm.settings.value == null || SystemClock.uptimeMillis() < holdUntil
