@@ -194,6 +194,68 @@ class DownloadManager @Inject constructor(
         running[id]?.transfer?.updateFiles(if (all) emptySet() else selected)
     }
 
+    /** A .torrent behind an HTTP link (capped at 20 MB, real ones are far smaller). */
+    suspend fun fetchTorrent(url: String, headers: Map<String, String> = emptyMap()): ByteArray = withContext(Dispatchers.IO) {
+        val req = okhttp3.Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()
+        client.newCall(req).execute().use { r ->
+            val body = r.body
+            if (!r.isSuccessful || body.contentLength() > 20L shl 20) throw IOException("Cannot fetch the torrent file")
+            body.bytes()
+        }
+    }
+
+    enum class QuickResult { FILE, TORRENT, VIDEO, NOTHING, FAILED }
+
+    /**
+     * Share-sheet "Quick download": works out what [input] is and starts it with the default choices (all torrent
+     * files, best video quality), without the add popup. [done] runs on the main thread.
+     */
+    fun quickAdd(input: String, done: (QuickResult, String?) -> Unit) = scope.launch {
+        val (result, detail) = try {
+            val s = settings.current()
+            when {
+                input.startsWith("magnet:", ignoreCase = true) -> {
+                    addTorrent(null, input, emptySet(), s.torrentSequential, true)
+                    QuickResult.TORRENT to null
+                }
+                com.aiyu.pull.video.VideoEngine.isVideoSite(input) -> quickVideo(input)
+                else -> {
+                    val info = probe(input)
+                    when {
+                        info.mimeType == "application/x-bittorrent" || info.fileName?.endsWith(".torrent", true) == true -> {
+                            val meta = torrents.get().parse(fetchTorrent(info.finalUrl))
+                            addTorrent(meta, null, emptySet(), s.torrentSequential, true)
+                            QuickResult.TORRENT to meta.name
+                        }
+                        // A page, not a file: yt-dlp may still find a video on it.
+                        info.mimeType == "text/html" -> runCatching {
+                            val meta = videos.get().info(input)
+                            addVideo(input, meta.title, com.aiyu.pull.video.VideoEngine.BEST, null)
+                            QuickResult.VIDEO to meta.title
+                        }.getOrElse { QuickResult.NOTHING to null }
+                        else -> {
+                            add(input, info.fileName)
+                            QuickResult.FILE to info.fileName
+                        }
+                    }
+                }
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Throwable) {
+            Log.w(TAG, "Quick download failed", e)
+            QuickResult.FAILED to e.message?.lines()?.lastOrNull { it.isNotBlank() }
+        }
+        withContext(Dispatchers.Main) { done(result, detail) }
+    }
+
+    /** Starts at once under a placeholder name; the real title replaces it when yt-dlp has read the page. */
+    private suspend fun quickVideo(url: String): Pair<QuickResult, String?> {
+        val id = addVideo(url, runCatching { java.net.URI(url).host }.getOrNull() ?: url, com.aiyu.pull.video.VideoEngine.BEST, null)
+        scope.launch { runCatching { videos.get().info(url).title }.onSuccess { dao.setName(id, it) } }
+        return QuickResult.VIDEO to null
+    }
+
     /** Torrent options from the details screen: saved, then applied to the running torrent if any. */
     fun torrentCommand(id: Long, c: TorrentCommand) = scope.launch {
         when (c) {

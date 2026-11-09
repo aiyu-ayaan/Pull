@@ -134,6 +134,9 @@ interface DownloadDao {
     @Query("UPDATE downloads SET torrentPath = :path, infoHash = :infoHash, fileName = :name, totalBytes = :total WHERE id = :id")
     suspend fun setTorrent(id: Long, path: String, infoHash: String, name: String, total: Long)
 
+    @Query("UPDATE downloads SET fileName = :name WHERE id = :id")
+    suspend fun setName(id: Long, name: String)
+
     @Query("UPDATE downloads SET selectedFiles = :selected WHERE id = :id")
     suspend fun setSelectedFiles(id: Long, selected: String)
 

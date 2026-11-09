@@ -116,6 +116,18 @@ class VideoEngine @Inject constructor(
         /** Best video + best audio, merged; falls back to the best single file. */
         const val BEST = "bv*+ba/b"
         const val AUDIO_ONLY = "ba/b"
+
+        private val videoHosts = listOf(
+            "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com", "twitter.com", "x.com", "instagram.com",
+            "tiktok.com", "facebook.com", "fb.watch", "reddit.com", "twitch.tv", "soundcloud.com", "bilibili.com",
+            "bandcamp.com", "streamable.com",
+        )
+
+        /** Sites where a link is a page with a video on it, so yt-dlp handles it instead of the HTTP engine. */
+        fun isVideoSite(url: String): Boolean {
+            val host = runCatching { java.net.URI(url).host?.lowercase() }.getOrNull() ?: return false
+            return videoHosts.any { host == it || host.endsWith(".$it") }
+        }
     }
 }
 

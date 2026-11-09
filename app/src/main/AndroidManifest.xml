@@ -58,6 +58,23 @@
             </intent-filter>
         </activity>
 
+        <!-- Second share target: starts the download straight away, without opening Pull. -->
+        <activity
+            android:name=".QuickDownloadActivity"
+            android:exported="true"
+            android:label="@string/quick_label"
+            android:icon="@mipmap/ic_launcher"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <!-- Own task: shows in Recents as a separate "Pull Browser" window, like its own app. -->
         <activity
             android:name=".browser.BrowserActivity"

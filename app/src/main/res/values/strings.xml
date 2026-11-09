@@ -300,4 +300,12 @@
     <string name="settings_ytdlp_auto">Update automatically</string>
     <string name="settings_ytdlp_auto_hint">Check at most once a day when Pull starts.</string>
     <string name="limit_unlimited">Unlimited</string>
+    <string name="quick_label">Quick download</string>
+    <string name="quick_no_link">No link to download in what was shared.</string>
+    <string name="quick_adding">Pull: checking the link…</string>
+    <string name="quick_file">Pull: downloading %s</string>
+    <string name="quick_torrent">Pull: torrent added, downloading all files</string>
+    <string name="quick_video">Pull: downloading video in best quality</string>
+    <string name="quick_nothing">Pull: no file or video found on that page</string>
+    <string name="quick_failed">Pull: could not download. %s</string>
 </resources>

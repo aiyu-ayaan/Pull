@@ -17,7 +17,6 @@ import com.aiyu.pull.video.VideoMeta
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,9 +25,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import javax.inject.Inject
 
@@ -50,7 +46,6 @@ class AddViewModel @Inject constructor(
     private val manager: DownloadManager,
     private val torrents: dagger.Lazy<TorrentEngine>,
     private val videos: dagger.Lazy<VideoEngine>,
-    private val client: OkHttpClient,
     settings: SettingsRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -73,13 +68,13 @@ class AddViewModel @Inject constructor(
                     torrentFile != null -> Analysis.Torrent(torrents.get().parse(File(torrentFile).readBytes()), null, false)
                     input.startsWith("magnet:", ignoreCase = true) -> fetchMagnet(input)
                     !input.startsWith("http://") && !input.startsWith("https://") -> Analysis.Idle
-                    isVideoSite(input) -> { _state.value = Analysis.Loading(R.string.analyze_video); Analysis.Video(videos.get().info(input)) }
+                    VideoEngine.isVideoSite(input) -> { _state.value = Analysis.Loading(R.string.analyze_video); Analysis.Video(videos.get().info(input)) }
                     else -> {
                         _state.value = Analysis.Loading(R.string.probe_loading)
                         val info = manager.probe(input, headers)
                         when {
                             info.mimeType == "application/x-bittorrent" || info.fileName?.endsWith(".torrent", true) == true ->
-                                Analysis.Torrent(torrents.get().parse(fetchSmall(info.finalUrl, headers)), null, false)
+                                Analysis.Torrent(torrents.get().parse(manager.fetchTorrent(info.finalUrl, headers)), null, false)
                             info.mimeType == "text/html" -> Analysis.WebPage(info)
                             else -> Analysis.FileLink(info)
                         }
@@ -116,15 +111,6 @@ class AddViewModel @Inject constructor(
         return Analysis.Torrent(bytes?.let { torrents.get().parse(it) }, uri, fetching = false)
     }
 
-    private suspend fun fetchSmall(url: String, headers: Map<String, String>): ByteArray = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()
-        client.newCall(req).execute().use { r ->
-            val body = r.body
-            if (!r.isSuccessful || body.contentLength() > 20L shl 20) throw java.io.IOException("Cannot fetch the torrent file")
-            body.bytes()
-        }
-    }
-
     suspend fun addFile(url: String, name: String?, pageUrl: String?, headers: Map<String, String>, connections: Int, start: Boolean): Long =
         manager.add(url, name, headers, pageUrl, connections.coerceIn(1, 32), start).also { reset() }
 
@@ -138,18 +124,5 @@ class AddViewModel @Inject constructor(
         job?.cancel()
         analyzed = null
         _state.value = Analysis.Idle
-    }
-
-    companion object {
-        private val videoHosts = listOf(
-            "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com", "twitter.com", "x.com", "instagram.com",
-            "tiktok.com", "facebook.com", "fb.watch", "reddit.com", "twitch.tv", "soundcloud.com", "bilibili.com",
-            "bandcamp.com", "streamable.com",
-        )
-
-        fun isVideoSite(url: String): Boolean {
-            val host = runCatching { java.net.URI(url).host?.lowercase() }.getOrNull() ?: return false
-            return videoHosts.any { host == it || host.endsWith(".$it") }
-        }
     }
 }
