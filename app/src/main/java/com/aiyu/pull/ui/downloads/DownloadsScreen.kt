@@ -25,7 +25,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Deselect
+import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
@@ -109,17 +122,38 @@ import com.aiyu.pull.ui.speakSpeed
 import com.aiyu.pull.ui.theme.Dimens
 import kotlinx.coroutines.launch
 
-/** Chips under the title: narrow the current tab to one file type. */
-private val kindChips = listOf(
-    null to R.string.kind_all,
-    FileKind.VIDEO to R.string.kind_video,
-    FileKind.AUDIO to R.string.kind_audio,
-    FileKind.DOCUMENT to R.string.kind_document,
-    FileKind.ARCHIVE to R.string.kind_archive,
-    FileKind.APK to R.string.kind_apk,
-    FileKind.IMAGE to R.string.kind_image,
-    FileKind.OTHER to R.string.kind_other,
-)
+/** Filter options under the title: file type or origin app. */
+enum class FilterType(val labelRes: Int) {
+    ALL(R.string.kind_all),
+    INSTAGRAM(R.string.filter_instagram),
+    YOUTUBE(R.string.filter_youtube),
+    VIDEO(R.string.kind_video),
+    AUDIO(R.string.kind_audio),
+    DOCUMENT(R.string.kind_document),
+    ARCHIVE(R.string.kind_archive),
+    APK(R.string.kind_apk),
+    IMAGE(R.string.kind_image),
+    OTHER(R.string.kind_other);
+
+    fun matches(e: com.aiyu.pull.data.DownloadEntity): Boolean = when (this) {
+        ALL -> true
+        INSTAGRAM -> e.url.contains("instagram.com", ignoreCase = true) ||
+            e.url.contains("instagr.am", ignoreCase = true) ||
+            e.pageUrl?.contains("instagram.com", ignoreCase = true) == true ||
+            e.pageUrl?.contains("instagr.am", ignoreCase = true) == true
+        YOUTUBE -> e.url.contains("youtube.com", ignoreCase = true) ||
+            e.url.contains("youtu.be", ignoreCase = true) ||
+            e.pageUrl?.contains("youtube.com", ignoreCase = true) == true ||
+            e.pageUrl?.contains("youtu.be", ignoreCase = true) == true
+        VIDEO -> FileKind.of(e.fileName, e.mimeType) == FileKind.VIDEO
+        AUDIO -> FileKind.of(e.fileName, e.mimeType) == FileKind.AUDIO
+        DOCUMENT -> FileKind.of(e.fileName, e.mimeType) == FileKind.DOCUMENT
+        ARCHIVE -> FileKind.of(e.fileName, e.mimeType) == FileKind.ARCHIVE
+        APK -> FileKind.of(e.fileName, e.mimeType) == FileKind.APK
+        IMAGE -> FileKind.of(e.fileName, e.mimeType) == FileKind.IMAGE
+        OTHER -> FileKind.of(e.fileName, e.mimeType) == FileKind.OTHER
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,94 +170,156 @@ fun DownloadsScreen(
 ) {
     val rows by vm.downloads.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
-    var kind by rememberSaveable { mutableStateOf<FileKind?>(null) }
+    var filter by rememberSaveable { mutableStateOf(FilterType.ALL) }
+    var selection by rememberSaveable { mutableStateOf(setOf<Long>()) }
+    var askDelete by rememberSaveable { mutableStateOf<List<Long>?>(null) }
+    val haptics = LocalHapticFeedback.current
+    val inSelection = selection.isNotEmpty()
     val insets = LocalBottomBarInsets.current
     var menuOpen by rememberSaveable { mutableStateOf(false) }
-    // Swiped rows hide at once; the delete only happens when the undo snackbar goes away.
-    var hidden by rememberSaveable { mutableStateOf(listOf<Long>()) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val fastEffects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val fastSpatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
 
-    BackHandler(menuOpen) { menuOpen = false }
+    BackHandler(inSelection) { selection = emptySet() }
+    BackHandler(menuOpen && !inSelection) { menuOpen = false }
 
-    val views = rows.orEmpty().filter { it.id !in hidden }.map { DownloadView(it, live[it.id]) }
-    val shown = views.filter { tab.matches(it.entity.status) && (kind == null || FileKind.of(it.entity.fileName, it.entity.mimeType) == kind) }
+    val views = rows.orEmpty().map { DownloadView(it, live[it.id]) }
+    val shown = views.filter { tab.matches(it.entity.status) && filter.matches(it.entity) }
     val active = views.count { it.running }
     val totalSpeed = views.sumOf { it.speed }
 
     Scaffold(
         modifier = modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection),
         topBar = {
-            LargeFlexibleTopAppBar(
-                title = { Text(stringResource(tab.title)) },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer, shapes = IconButtonDefaults.shapes()) {
-                        MenuIcon(drawerProgress, Modifier.semantics { contentDescription = context.getString(R.string.cd_open_drawer) })
-                    }
+            AnimatedContent(
+                targetState = inSelection,
+                transitionSpec = {
+                    (fadeIn(animationSpec = fastEffects) +
+                        scaleIn(animationSpec = fastSpatial, initialScale = 0.95f))
+                        .togetherWith(
+                            fadeOut(animationSpec = fastEffects) +
+                                scaleOut(animationSpec = fastSpatial, targetScale = 0.95f)
+                        )
                 },
-                subtitle = {
-                    // The headline number: aggregate speed, like a desktop download manager's status bar.
-                    AnimatedContent(active > 0, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "subtitle") { busy ->
-                        if (busy) {
-                            val speed by rememberGlide(totalSpeed)
+                label = "topBar"
+            ) { selecting ->
+                if (selecting) {
+                    TopAppBar(
+                        title = {
                             Text(
-                                pluralStringResource(R.plurals.downloads_subtitle_active, active, formatSpeed(speed), active),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.semantics { contentDescription = speakSpeed(totalSpeed) },
+                                pluralStringResource(R.plurals.selected_count, selection.size, selection.size),
+                                style = MaterialTheme.typography.titleLarge
                             )
-                        } else {
-                            val n = views.count { tab.matches(it.entity.status) }
-                            Text(pluralStringResource(R.plurals.downloads_subtitle_idle, n, n))
-                        }
-                    }
-                },
-                actions = {
-                    val anyRunning = views.any { it.running || it.entity.status == Status.QUEUED }
-                    val anyPaused = views.any { it.entity.status == Status.PAUSED }
-                    if (anyRunning) IconButton(onClick = vm::pauseAll, shapes = IconButtonDefaults.shapes()) {
-                        Icon(Icons.Rounded.PauseCircle, stringResource(R.string.action_pause_all))
-                    } else if (anyPaused) IconButton(onClick = vm::resumeAll, shapes = IconButtonDefaults.shapes()) {
-                        Icon(Icons.Rounded.PlayCircle, stringResource(R.string.action_resume_all))
-                    }
-                },
-                scrollBehavior = scroll,
-            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { selection = emptySet() }, shapes = IconButtonDefaults.shapes()) {
+                                Icon(Icons.Rounded.Close, stringResource(R.string.cd_clear_selection))
+                            }
+                        },
+                        actions = {
+                            val allSelected = shown.isNotEmpty() && selection.size == shown.size
+                            IconButton(
+                                onClick = {
+                                    selection = if (allSelected) emptySet() else shown.map { it.id }.toSet()
+                                },
+                                shapes = IconButtonDefaults.shapes(),
+                            ) {
+                                Icon(
+                                    if (allSelected) Icons.Rounded.Deselect else Icons.Rounded.SelectAll,
+                                    stringResource(if (allSelected) R.string.action_deselect_all else R.string.action_select_all)
+                                )
+                            }
+                            IconButton(
+                                onClick = { askDelete = selection.toList() },
+                                shapes = IconButtonDefaults.shapes(),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Delete,
+                                    stringResource(R.string.action_delete),
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                    )
+                } else {
+                    LargeFlexibleTopAppBar(
+                        title = { Text(stringResource(tab.title)) },
+                        navigationIcon = {
+                            IconButton(onClick = onOpenDrawer, shapes = IconButtonDefaults.shapes()) {
+                                MenuIcon(drawerProgress, Modifier.semantics { contentDescription = context.getString(R.string.cd_open_drawer) })
+                            }
+                        },
+                        subtitle = {
+                            AnimatedContent(active > 0, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "subtitle") { busy ->
+                                if (busy) {
+                                    val speed by rememberGlide(totalSpeed)
+                                    Text(
+                                        pluralStringResource(R.plurals.downloads_subtitle_active, active, formatSpeed(speed), active),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.semantics { contentDescription = speakSpeed(totalSpeed) },
+                                    )
+                                } else {
+                                    val n = views.count { tab.matches(it.entity.status) }
+                                    Text(pluralStringResource(R.plurals.downloads_subtitle_idle, n, n))
+                                }
+                            }
+                        },
+                        actions = {
+                            val anyRunning = views.any { it.running || it.entity.status == Status.QUEUED }
+                            val anyPaused = views.any { it.entity.status == Status.PAUSED }
+                            if (anyRunning) IconButton(onClick = vm::pauseAll, shapes = IconButtonDefaults.shapes()) {
+                                Icon(Icons.Rounded.PauseCircle, stringResource(R.string.action_pause_all))
+                            } else if (anyPaused) IconButton(onClick = vm::resumeAll, shapes = IconButtonDefaults.shapes()) {
+                                Icon(Icons.Rounded.PlayCircle, stringResource(R.string.action_resume_all))
+                            }
+                        },
+                        scrollBehavior = scroll,
+                    )
+                }
+            }
         },
         floatingActionButton = {
-            FloatingActionButtonMenu(
-                modifier = Modifier.padding(bottom = insets.fab),
-                expanded = menuOpen,
-                button = {
-                    ToggleFloatingActionButton(
-                        checked = menuOpen,
-                        onCheckedChange = { menuOpen = it },
-                        modifier = Modifier.semantics {
-                            traversalIndex = -1f
-                            stateDescription = if (menuOpen) "expanded" else "collapsed"
-                        },
-                    ) {
-                        val icon = if (checkedProgress > 0.5f) Icons.Rounded.Close else Icons.Rounded.Add
-                        Icon(icon, stringResource(R.string.cd_add_menu), Modifier.animateIcon({ checkedProgress }))
-                    }
-                },
-            ) {
-                FloatingActionButtonMenuItem(
-                    onClick = { menuOpen = false; onAdd(false) },
-                    icon = { Icon(Icons.Rounded.Add, null) },
-                    text = { Text(stringResource(R.string.fab_add_url)) },
-                )
-                FloatingActionButtonMenuItem(
-                    onClick = { menuOpen = false; onAdd(true) },
-                    icon = { Icon(Icons.Rounded.ContentPaste, null) },
-                    text = { Text(stringResource(R.string.fab_paste)) },
-                )
-                FloatingActionButtonMenuItem(
-                    onClick = { menuOpen = false; onBrowser() },
-                    icon = { Icon(Icons.Rounded.Public, null) },
-                    text = { Text(stringResource(R.string.fab_browser)) },
-                )
+            if (!inSelection) {
+                FloatingActionButtonMenu(
+                    modifier = Modifier.padding(bottom = insets.fab),
+                    expanded = menuOpen,
+                    button = {
+                        ToggleFloatingActionButton(
+                            checked = menuOpen,
+                            onCheckedChange = { menuOpen = it },
+                            modifier = Modifier.semantics {
+                                traversalIndex = -1f
+                                stateDescription = if (menuOpen) "expanded" else "collapsed"
+                            },
+                        ) {
+                            val icon = if (checkedProgress > 0.5f) Icons.Rounded.Close else Icons.Rounded.Add
+                            Icon(icon, stringResource(R.string.cd_add_menu), Modifier.animateIcon({ checkedProgress }))
+                        }
+                    },
+                ) {
+                    FloatingActionButtonMenuItem(
+                        onClick = { menuOpen = false; onAdd(false) },
+                        icon = { Icon(Icons.Rounded.Add, null) },
+                        text = { Text(stringResource(R.string.fab_add_url)) },
+                    )
+                    FloatingActionButtonMenuItem(
+                        onClick = { menuOpen = false; onAdd(true) },
+                        icon = { Icon(Icons.Rounded.ContentPaste, null) },
+                        text = { Text(stringResource(R.string.fab_paste)) },
+                    )
+                    FloatingActionButtonMenuItem(
+                        onClick = { menuOpen = false; onBrowser() },
+                        icon = { Icon(Icons.Rounded.Public, null) },
+                        text = { Text(stringResource(R.string.fab_browser)) },
+                    )
+                }
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -233,12 +329,16 @@ fun DownloadsScreen(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = readableGutter()),
                 horizontalArrangement = Arrangement.spacedBy(Dimens.sm),
             ) {
-                kindChips.forEach { (k, label) ->
-                    FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(stringResource(label)) })
+                FilterType.entries.forEach { f ->
+                    FilterChip(
+                        selected = filter == f,
+                        onClick = { filter = f },
+                        label = { Text(stringResource(f.labelRes)) }
+                    )
                 }
             }
             if (rows != null && shown.isEmpty()) {
-                EmptyState(tab, kind == null, Modifier.weight(1f).padding(bottom = insets.content))
+                EmptyState(tab, filter == FilterType.ALL, Modifier.weight(1f).padding(bottom = insets.content))
                 return@Column
             }
             LazyColumn(
@@ -254,55 +354,128 @@ fun DownloadsScreen(
                 }
                 val groups = if (tab == Tab.DONE) shown.groupBy { dayLabel(context, it.entity.finishedAt ?: it.entity.createdAt) } else mapOf("" to shown)
                 groups.forEach { (day, group) ->
-                if (day.isNotEmpty()) item(key = "day:$day") {
-                    Text(
-                        day, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.animateItem().padding(start = Dimens.sm, top = Dimens.md),
-                    )
-                }
-                items(group, key = { it.id }) { view ->
-                    SwipeToDelete(
-                        onDelete = {
-                            hidden = hidden + view.id
-                            scope.launch {
-                                val result = snackbar.showSnackbar(
-                                    context.getString(R.string.snackbar_removed, view.entity.fileName),
-                                    actionLabel = context.getString(R.string.action_undo),
-                                    withDismissAction = true,
-                                    duration = SnackbarDuration.Short,
-                                )
-                                if (result != SnackbarResult.ActionPerformed) vm.delete(view.id, withFile = false)
-                                hidden = hidden - view.id
-                            }
-                        },
-                        modifier = Modifier.animateItem(),
-                    ) {
-                        DownloadRow(
-                            view = view,
-                            selected = view.id == selectedId,
-                            onClick = { onOpen(view.id) },
-                            onToggle = { if (view.running || view.entity.status == Status.QUEUED) vm.pause(view.id) else vm.resume(view.id) },
-                            onOpenFile = {
-                                if (!openFile(context, vm.files, view.entity)) scope.launch { snackbar.showSnackbar(context.getString(R.string.no_app_to_open)) }
-                            },
+                    if (day.isNotEmpty()) item(key = "day:$day") {
+                        Text(
+                            day, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.animateItem().padding(start = Dimens.sm, top = Dimens.md),
                         )
                     }
-                }
+                    items(group, key = { it.id }) { view ->
+                        SwipeToDelete(
+                            enabled = !inSelection,
+                            onDelete = { askDelete = listOf(view.id) },
+                            modifier = Modifier.animateItem(),
+                        ) {
+                            DownloadRow(
+                                view = view,
+                                selected = view.id == selectedId,
+                                inSelection = inSelection,
+                                checked = view.id in selection,
+                                onClick = {
+                                    if (inSelection) {
+                                        selection = if (view.id in selection) selection - view.id else selection + view.id
+                                    } else {
+                                        onOpen(view.id)
+                                    }
+                                },
+                                onLongClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    selection = if (view.id in selection) selection - view.id else selection + view.id
+                                },
+                                onToggle = { if (view.running || view.entity.status == Status.QUEUED) vm.pause(view.id) else vm.resume(view.id) },
+                                onOpenFile = {
+                                    if (!openFile(context, vm.files, view.entity)) scope.launch { snackbar.showSnackbar(context.getString(R.string.no_app_to_open)) }
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+
+    askDelete?.let { ids ->
+        val targetViews = views.filter { it.id in ids }
+        var withFile by rememberSaveable(ids) { mutableStateOf(targetViews.any { it.entity.status == Status.COMPLETED }) }
+        AlertDialog(
+            onDismissRequest = { askDelete = null },
+            icon = { Icon(Icons.Rounded.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = {
+                Text(
+                    if (ids.size == 1) stringResource(R.string.delete_title)
+                    else pluralStringResource(R.plurals.delete_title_count, ids.size, ids.size)
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        if (ids.size == 1) {
+                            targetViews.firstOrNull()?.entity?.fileName.orEmpty()
+                        } else {
+                            pluralStringResource(R.plurals.delete_body_count, ids.size, ids.size)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(Dimens.md))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable { withFile = !withFile }
+                            .padding(vertical = Dimens.xs)
+                    ) {
+                        Checkbox(checked = withFile, onCheckedChange = { withFile = it })
+                        Spacer(Modifier.width(Dimens.sm))
+                        Text(stringResource(R.string.delete_file_too), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        ids.forEach { id -> vm.delete(id, withFile) }
+                        selection = selection - ids.toSet()
+                        askDelete = null
+                    }
+                ) {
+                    Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { askDelete = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeToDelete(onDelete: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    val state = rememberSwipeToDismissBoxState()
+private fun SwipeToDelete(
+    enabled: Boolean = true,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                false
+            } else {
+                false
+            }
+        }
+    )
     SwipeToDismissBox(
         state = state,
         enableDismissFromStartToEnd = false,
-        onDismiss = { if (it == SwipeToDismissBoxValue.EndToStart) onDelete() },
+        enableDismissFromEndToStart = enabled,
         backgroundContent = {
+            if (!enabled) return@SwipeToDismissBox
             val color by animateColorAsState(
                 if (state.targetValue == SwipeToDismissBoxValue.EndToStart) MaterialTheme.colorScheme.errorContainer
                 else MaterialTheme.colorScheme.surfaceContainer,
@@ -319,55 +492,112 @@ private fun SwipeToDelete(onDelete: () -> Unit, modifier: Modifier = Modifier, c
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DownloadRow(view: DownloadView, selected: Boolean, onClick: () -> Unit, onToggle: () -> Unit, onOpenFile: () -> Unit) {
+private fun DownloadRow(
+    view: DownloadView,
+    selected: Boolean,
+    inSelection: Boolean,
+    checked: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onToggle: () -> Unit,
+    onOpenFile: () -> Unit
+) {
     val e = view.entity
     val kind = FileKind.of(e.fileName, e.mimeType)
     val tone = kind.tone
     val c = MaterialTheme.colorScheme
+    val fastEffects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val fastSpatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    val rowColor by animateColorAsState(
+        targetValue = when {
+            checked -> c.secondaryContainer
+            selected -> c.secondaryContainer
+            else -> c.surfaceContainerLow
+        },
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "rowColor"
+    )
     Surface(
         shape = MaterialTheme.shapes.large,
-        color = if (selected) c.secondaryContainer else c.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick),
+        color = rowColor,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
     ) {
         Column(Modifier.padding(horizontal = Dimens.lg, vertical = Dimens.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val thumbUrl = e.headers["X-Pull-Thumbnail"]
-                if (!thumbUrl.isNullOrBlank()) {
-                    com.aiyu.pull.ui.components.RemoteThumbnail(
-                        url = thumbUrl,
-                        modifier = Modifier.size(44.dp),
-                        shape = MaterialTheme.shapes.small,
-                        placeholder = {
+                AnimatedContent(
+                    targetState = inSelection,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = fastEffects) +
+                            scaleIn(animationSpec = fastSpatial, initialScale = 0.8f))
+                            .togetherWith(
+                                fadeOut(animationSpec = fastEffects) +
+                                    scaleOut(animationSpec = fastSpatial, targetScale = 0.8f)
+                            )
+                    },
+                    label = "leadingCheckbox"
+                ) { selecting ->
+                    if (selecting) {
+                        Box(
+                            modifier = Modifier.size(44.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = null,
+                            )
+                        }
+                    } else {
+                        val thumbUrl = e.headers["X-Pull-Thumbnail"]
+                        if (!thumbUrl.isNullOrBlank()) {
+                            com.aiyu.pull.ui.components.RemoteThumbnail(
+                                url = thumbUrl,
+                                modifier = Modifier.size(44.dp),
+                                shape = MaterialTheme.shapes.small,
+                                placeholder = {
+                                    ShapeIcon(kind.icon, kind.shape, tone.container, tone.onContainer, size = 44.dp, iconSize = 22.dp)
+                                }
+                            )
+                        } else {
                             ShapeIcon(kind.icon, kind.shape, tone.container, tone.onContainer, size = 44.dp, iconSize = 22.dp)
                         }
-                    )
-                } else {
-                    ShapeIcon(kind.icon, kind.shape, tone.container, tone.onContainer, size = 44.dp, iconSize = 22.dp)
+                    }
                 }
                 Spacer(Modifier.width(Dimens.md))
                 Column(Modifier.weight(1f)) {
                     Text(e.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
                     StatusLine(view)
                 }
-                when (e.status) {
-                    Status.RUNNING, Status.QUEUED, Status.PAUSED -> {
-                        val on = e.status != Status.PAUSED
-                        FilledTonalIconToggleButton(
-                            checked = on,
-                            onCheckedChange = { onToggle() },
-                            shapes = IconButtonDefaults.toggleableShapes(),
-                        ) {
-                            Icon(
-                                if (on) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                stringResource(if (on) R.string.action_pause else R.string.action_resume),
-                            )
+                AnimatedVisibility(
+                    visible = !inSelection,
+                    enter = fadeIn(fastEffects) + scaleIn(fastSpatial, initialScale = 0.8f),
+                    exit = fadeOut(fastEffects) + scaleOut(fastSpatial, targetScale = 0.8f)
+                ) {
+                    when (e.status) {
+                        Status.RUNNING, Status.QUEUED, Status.PAUSED -> {
+                            val on = e.status != Status.PAUSED
+                            FilledTonalIconToggleButton(
+                                checked = on,
+                                onCheckedChange = { onToggle() },
+                                shapes = IconButtonDefaults.toggleableShapes(),
+                            ) {
+                                Icon(
+                                    if (on) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    stringResource(if (on) R.string.action_pause else R.string.action_resume),
+                                )
+                            }
                         }
-                    }
-                    Status.FAILED -> IconButton(onClick = onToggle, shapes = IconButtonDefaults.shapes()) {
-                        Icon(Icons.Rounded.Refresh, stringResource(R.string.action_retry))
-                    }
-                    Status.COMPLETED -> FilledTonalIconButton(onClick = onOpenFile, shapes = IconButtonDefaults.shapes()) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, stringResource(R.string.action_open))
+                        Status.FAILED -> IconButton(onClick = onToggle, shapes = IconButtonDefaults.shapes()) {
+                            Icon(Icons.Rounded.Refresh, stringResource(R.string.action_retry))
+                        }
+                        Status.COMPLETED -> FilledTonalIconButton(onClick = onOpenFile, shapes = IconButtonDefaults.shapes()) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, stringResource(R.string.action_open))
+                        }
                     }
                 }
             }
