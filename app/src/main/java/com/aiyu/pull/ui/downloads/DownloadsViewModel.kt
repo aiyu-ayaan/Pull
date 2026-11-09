@@ -35,6 +35,8 @@ class DownloadsViewModel @Inject constructor(
     fun pauseAll() = manager.pauseAll()
     fun resumeAll() = manager.resumeAll()
     fun refreshLink(id: Long, url: String) = manager.refreshLink(id, url)
+    fun setTorrentFiles(id: Long, selected: Set<Int>, count: Int) = manager.setTorrentFiles(id, selected, count)
+    fun torrentFiles(e: DownloadEntity) = manager.torrentFiles(e)
 }
 
 /** One download as the UI shows it: live numbers while running, saved numbers otherwise. */

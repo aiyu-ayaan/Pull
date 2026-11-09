@@ -38,6 +38,9 @@ android {
     }
 
     packaging {
+        // yt-dlp runs its Python/FFmpeg/aria2c binaries from nativeLibraryDir, so native libs are extracted on install.
+        // The binaries themselves are 16 KB aligned since youtubedl-android 0.18.
+        jniLibs.useLegacyPackaging = true
         resources.excludes += listOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/*.version", "/META-INF/*.kotlin_module", "DebugProbesKt.bin")
     }
 
@@ -63,6 +66,18 @@ kotlin {
 
 dependencies {
     implementation(project(":engine"))
+
+    // Torrents: libtorrent (MIT) with natives for every Android ABI.
+    implementation(libs.libtorrent4j)
+    implementation(libs.libtorrent4j.arm)
+    implementation(libs.libtorrent4j.arm64)
+    implementation(libs.libtorrent4j.x86)
+    implementation(libs.libtorrent4j.x64)
+
+    // Video sites: yt-dlp + Python + FFmpeg (GPL-3.0), as in Seal.
+    implementation(libs.youtubedl.library)
+    implementation(libs.youtubedl.ffmpeg)
+    implementation(libs.youtubedl.aria2c)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime)

@@ -61,6 +61,9 @@ import com.aiyu.pull.browser.BrowserActivity
 import com.aiyu.pull.data.Status
 import com.aiyu.pull.ui.add.AddDownloadSheet
 import com.aiyu.pull.ui.add.AddRequest
+import com.aiyu.pull.ui.add.copyTorrent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.aiyu.pull.ui.components.MorphingShape
 import com.aiyu.pull.ui.components.PredictiveBack
 import com.aiyu.pull.ui.components.PushDrawer
@@ -122,6 +125,9 @@ fun PullAppShell(event: AppEvent?, onEventHandled: () -> Unit) {
     }
 
     val closeDrawer = { scope.launch { drawer.close() } }
+    val pickTorrent = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { copyTorrent(context, it) }?.let { adding = AddRequest(torrentFile = it) }
+    }
     val openBrowser = { url: String?, refreshId: Long -> BrowserActivity.start(context, url, refreshId) }
     val addFromClipboard = { adding = AddRequest(clipboardUrl(context).orEmpty()) }
 
@@ -133,6 +139,7 @@ fun PullAppShell(event: AppEvent?, onEventHandled: () -> Unit) {
                 settingsOpen = onSettings,
                 onAddLink = { closeDrawer(); adding = AddRequest() },
                 onPaste = { closeDrawer(); addFromClipboard() },
+                onOpenTorrent = { closeDrawer(); pickTorrent.launch(arrayOf("application/x-bittorrent", "application/octet-stream")) },
                 onBrowser = { closeDrawer(); openBrowser(null, -1) },
                 onSettings = { closeDrawer(); nav.navigate(SettingsRoute) { launchSingleTop = true } },
             )

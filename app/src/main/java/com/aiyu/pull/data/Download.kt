@@ -1,5 +1,7 @@
 package com.aiyu.pull.data
 
+import androidx.room.AutoMigration
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -15,6 +17,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
 
 enum class Status { QUEUED, RUNNING, PAUSED, COMPLETED, FAILED }
+
+/** What fetches the bytes: the segmented HTTP engine, libtorrent, or yt-dlp. */
+enum class Kind { HTTP, TORRENT, VIDEO }
 
 @Entity(tableName = "downloads")
 data class DownloadEntity(
@@ -44,6 +49,19 @@ data class DownloadEntity(
     val activeMillis: Long = 0,
     val errorKind: String? = null,
     val error: String? = null,
+    @ColumnInfo(defaultValue = "HTTP") val kind: Kind = Kind.HTTP,
+    /** Torrent: the .torrent file Pull keeps (magnets get one once metadata arrives). */
+    val torrentPath: String? = null,
+    val infoHash: String? = null,
+    /** Torrent: chosen file indices, comma separated; empty = all. */
+    @ColumnInfo(defaultValue = "") val selectedFiles: String = "",
+    @ColumnInfo(defaultValue = "0") val sequential: Boolean = false,
+    /** Torrent and video: folder the files go to. */
+    val saveDir: String? = null,
+    /** Video: yt-dlp format selector, e.g. `bv*+ba/b` (best) or a chosen format id. */
+    val videoFormat: String? = null,
+    /** Video: extra yt-dlp arguments from a custom command template. */
+    val extraArgs: String? = null,
 ) {
     val headers: Map<String, String> get() = runCatching { Json.decodeFromString<Map<String, String>>(headersJson) }.getOrDefault(emptyMap())
 
@@ -105,6 +123,15 @@ interface DownloadDao {
         etag: String?, lastModified: String?, acceptRanges: Boolean, activeDelta: Long,
     )
 
+    @Query("UPDATE downloads SET downloadedBytes = :downloaded, totalBytes = :total, activeMillis = activeMillis + :activeDelta WHERE id = :id")
+    suspend fun saveSimpleProgress(id: Long, downloaded: Long, total: Long, activeDelta: Long)
+
+    @Query("UPDATE downloads SET torrentPath = :path, infoHash = :infoHash, fileName = :name, totalBytes = :total WHERE id = :id")
+    suspend fun setTorrent(id: Long, path: String, infoHash: String, name: String, total: Long)
+
+    @Query("UPDATE downloads SET selectedFiles = :selected WHERE id = :id")
+    suspend fun setSelectedFiles(id: Long, selected: String)
+
     @Query("UPDATE downloads SET activeMillis = activeMillis + :activeDelta WHERE id = :id")
     suspend fun addActiveTime(id: Long, activeDelta: Long)
 
@@ -118,7 +145,12 @@ interface DownloadDao {
     suspend fun delete(id: Long)
 }
 
-@Database(entities = [DownloadEntity::class], version = 1, exportSchema = true)
+@Database(
+    entities = [DownloadEntity::class],
+    version = 2,
+    exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 abstract class PullDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao
 }

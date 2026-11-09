@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.AddLink
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +39,7 @@ fun PullDrawerSheet(
     settingsOpen: Boolean,
     onAddLink: () -> Unit,
     onPaste: () -> Unit,
+    onOpenTorrent: () -> Unit,
     onBrowser: () -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -63,6 +65,7 @@ fun PullDrawerSheet(
         Section(R.string.drawer_section_add)
         Item(Icons.Rounded.AddLink, stringResource(R.string.fab_add_url), onClick = onAddLink)
         Item(Icons.Rounded.ContentPaste, stringResource(R.string.fab_paste), onClick = onPaste)
+        Item(Icons.Rounded.FileOpen, stringResource(R.string.drawer_open_torrent), onClick = onOpenTorrent)
         Item(
             Icons.Rounded.Public, stringResource(R.string.nav_browser), onClick = onBrowser,
             trailing = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, stringResource(R.string.cd_opens_separately)) },

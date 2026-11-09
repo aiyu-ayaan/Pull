@@ -93,7 +93,7 @@ class FileStore @Inject constructor(@ApplicationContext private val context: Con
 
     fun delete(uri: Uri) {
         runCatching {
-            if (uri.scheme == "file") File(uri.path!!).delete() else resolver.delete(uri, null, null)
+            if (uri.scheme == "file") File(uri.path!!).deleteRecursively() else resolver.delete(uri, null, null)
         }
     }
 

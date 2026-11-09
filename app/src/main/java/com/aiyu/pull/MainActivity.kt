@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aiyu.pull.ui.add.AddRequest
+import com.aiyu.pull.ui.add.copyTorrent
 import com.aiyu.pull.ui.navigation.AppEvent
 import com.aiyu.pull.ui.navigation.PullAppShell
 import com.aiyu.pull.ui.navigation.firstUrl
@@ -53,7 +55,11 @@ class MainActivity : ComponentActivity() {
         val id = intent.getLongExtra(EXTRA_DOWNLOAD_ID, -1)
         when {
             id >= 0 -> event = AppEvent.OpenDownload(id)
-            intent.action == Intent.ACTION_SEND -> firstUrl(intent.getStringExtra(Intent.EXTRA_TEXT))?.let { event = AppEvent.Add(com.aiyu.pull.ui.add.AddRequest(it)) }
+            intent.action == Intent.ACTION_SEND -> (firstUrl(intent.getStringExtra(Intent.EXTRA_TEXT)) ?: intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.startsWith("magnet:", true) })?.let { event = AppEvent.Add(AddRequest(it)) }
+            intent.action == Intent.ACTION_VIEW && intent.data?.scheme.equals("magnet", true) ->
+                event = AppEvent.Add(AddRequest(intent.dataString.orEmpty()))
+            intent.action == Intent.ACTION_VIEW && intent.data != null ->
+                copyTorrent(this, intent.data!!)?.let { event = AppEvent.Add(AddRequest(torrentFile = it)) }
         }
     }
 

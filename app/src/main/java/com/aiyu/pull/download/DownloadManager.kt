@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.aiyu.pull.data.DownloadDao
 import com.aiyu.pull.data.DownloadEntity
+import com.aiyu.pull.data.Kind
 import com.aiyu.pull.data.SettingsRepository
 import com.aiyu.pull.data.Status
 import com.aiyu.pull.data.encodeSegments
@@ -54,6 +55,7 @@ data class LiveStats(
     /** Speed once a second, oldest first, last 60 s. */
     val history: List<Long>,
     val peakBytesPerSecond: Long,
+    val torrent: TorrentLive? = null,
 )
 
 /**
@@ -69,12 +71,15 @@ class DownloadManager @Inject constructor(
     private val settings: SettingsRepository,
     private val network: NetworkMonitor,
     private val notifier: Notifier,
+    // Lazy: the native torrent session and the Python runtime start only when such a download runs.
+    private val torrents: dagger.Lazy<com.aiyu.pull.torrent.TorrentEngine>,
+    private val videos: dagger.Lazy<com.aiyu.pull.video.VideoEngine>,
 ) {
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e -> Log.e(TAG, "Download manager failure", e) },
     )
 
-    private class Running(val task: DownloadTask, val job: Job) {
+    private class Running(val transfer: Transfer, val job: Job) {
         /** What a cancel means: a pause, or a restart that re-queues. */
         @Volatile var stopAs = Status.PAUSED
         val history = ArrayDeque<Long>()
@@ -133,6 +138,65 @@ class DownloadManager @Inject constructor(
         if (start) schedule()
         return id
     }
+
+    /** Torrent from a .torrent file ([meta] set) or a magnet whose metadata arrives later ([meta] null). */
+    suspend fun addTorrent(
+        meta: com.aiyu.pull.torrent.TorrentMeta?,
+        magnet: String?,
+        selected: Set<Int>,
+        sequential: Boolean,
+        start: Boolean,
+    ): Long {
+        val engine = torrents.get()
+        val stored = meta?.let(engine::store)
+        val link = magnet ?: "magnet:?xt=urn:btih:${meta!!.infoHash}&dn=${java.net.URLEncoder.encode(meta.name, "UTF-8")}"
+        val name = meta?.name ?: Regex("""[?&]dn=([^&]+)""").find(link)?.groupValues?.get(1)
+            ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrDefault(it) } ?: "Torrent"
+        val wanted = meta?.files?.withIndex()?.filter { selected.isEmpty() || it.index in selected }?.sumOf { it.value.second }
+        val id = dao.insert(
+            DownloadEntity(
+                url = link, fileName = name, kind = Kind.TORRENT,
+                torrentPath = stored?.path, infoHash = meta?.infoHash,
+                selectedFiles = selected.sorted().joinToString(","), sequential = sequential,
+                totalBytes = wanted ?: -1, maxConnections = 0,
+                status = if (start) Status.QUEUED else Status.PAUSED,
+            ),
+        )
+        if (start) schedule()
+        return id
+    }
+
+    /** A page yt-dlp understands. [format] is a yt-dlp selector; [extraArgs] come from a command template. */
+    suspend fun addVideo(
+        url: String,
+        title: String,
+        format: String,
+        extraArgs: String?,
+        headers: Map<String, String> = emptyMap(),
+        sizeHint: Long = -1,
+        start: Boolean = true,
+    ): Long {
+        val id = dao.insert(
+            DownloadEntity(
+                url = url, pageUrl = url, fileName = title, kind = Kind.VIDEO, videoFormat = format, extraArgs = extraArgs,
+                headersJson = DownloadEntity.encodeHeaders(headers), totalBytes = sizeHint, maxConnections = 0,
+                status = if (start) Status.QUEUED else Status.PAUSED,
+            ),
+        )
+        if (start) schedule()
+        return id
+    }
+
+    /** Torrent: download only [selected] files (all when it covers every file). Applies live when running. */
+    fun setTorrentFiles(id: Long, selected: Set<Int>, fileCount: Int) = scope.launch {
+        val all = selected.size >= fileCount
+        dao.setSelectedFiles(id, if (all) "" else selected.sorted().joinToString(","))
+        running[id]?.transfer?.updateFiles(if (all) emptySet() else selected)
+    }
+
+    /** Files inside a torrent, from its stored .torrent; empty until a magnet's metadata arrived. */
+    fun torrentFiles(e: DownloadEntity): List<Pair<String, Long>> =
+        e.torrentPath?.let { runCatching { torrents.get().parse(java.io.File(it).readBytes()).files }.getOrNull() }.orEmpty()
 
     fun pause(id: Long) = scope.launch {
         val r = running[id]
@@ -223,28 +287,36 @@ class DownloadManager @Inject constructor(
 
     private suspend fun start(e: DownloadEntity) {
         dao.setStatus(e.id, Status.RUNNING)
-        val task = DownloadTask(
-            client = client,
-            request = DownloadRequest(e.url, e.headers, e.maxConnections, resume = e.resumeData()),
-            openFile = { info -> openFile(e.id, info) },
-            awaitNetwork = network::awaitConnected,
-        )
-        val job = scope.launch(start = CoroutineStart.LAZY) { execute(e.id, task) }
-        running[e.id] = Running(task, job)
+        val transfer: Transfer = when (e.kind) {
+            Kind.TORRENT -> torrents.get().transfer(e)
+            Kind.VIDEO -> videos.get().transfer(e)
+            Kind.HTTP -> HttpTransfer(
+                e.id,
+                DownloadTask(
+                    client = client,
+                    request = DownloadRequest(e.url, e.headers, e.maxConnections, resume = e.resumeData()),
+                    openFile = { info -> openFile(e.id, info) },
+                    awaitNetwork = network::awaitConnected,
+                ),
+                dao, files,
+            )
+        }
+        val job = scope.launch(start = CoroutineStart.LAZY) { execute(e.id, transfer) }
+        running[e.id] = Running(transfer, job)
         _active.value = running.size
         job.start()
     }
 
-    private suspend fun CoroutineScope.execute(id: Long, task: DownloadTask) {
+    private suspend fun CoroutineScope.execute(id: Long, task: Transfer) {
         val flusher = launch { while (true) { delay(1_000); save(id) } }
         try {
-            val info = task.run()
+            val size = task.run()
             flusher.cancelAndJoin()
             save(id)
+            task.publish()
             val e = dao.get(id) ?: return
-            e.fileUri?.let { files.publish(files.parse(it)) }
             dao.finish(id, Status.COMPLETED, null, null, System.currentTimeMillis())
-            notifier.completed(id, e.fileName, info.totalBytes)
+            notifier.completed(id, e.fileName, size)
         } catch (c: CancellationException) {
             withContext(NonCancellable) {
                 flusher.cancelAndJoin()
@@ -288,17 +360,7 @@ class DownloadManager @Inject constructor(
         val now = SystemClock.elapsedRealtime()
         val delta = now - r.lastSave
         r.lastSave = now
-        val snap = r.task.snapshot()
-        if (snap == null) {
-            dao.addActiveTime(id, delta)
-            return@withLock
-        }
-        val i = snap.info
-        val remaining = snap.segments.sumOf { (it.end - it.current + 1).coerceAtLeast(0) }
-        val downloaded = if (i.totalBytes >= 0) i.totalBytes - remaining else r.task.progress.value.downloadedBytes
-        dao.saveProgress(
-            id, downloaded, encodeSegments(snap.segments), i.finalUrl, i.totalBytes, i.etag, i.lastModified, i.acceptRanges, delta,
-        )
+        r.transfer.save(delta)
     }
 
     private suspend fun sampleLive() {
@@ -311,13 +373,13 @@ class DownloadManager @Inject constructor(
             delay(250)
             tick++
             _live.value = running.mapValues { (_, r) ->
-                val p = r.task.progress.value
+                val p = r.transfer.progress.value
                 if (tick % 4 == 0) {
                     r.history.addLast(p.bytesPerSecond)
                     if (r.history.size > 60) r.history.removeFirst()
                 }
                 r.peak = maxOf(r.peak, p.bytesPerSecond)
-                LiveStats(p.downloadedBytes, p.info?.totalBytes ?: -1, p.bytesPerSecond, p.segments, r.history.toList(), r.peak)
+                LiveStats(p.downloadedBytes, p.info?.totalBytes ?: -1, p.bytesPerSecond, p.segments, r.history.toList(), r.peak, r.transfer.torrent.value)
             }
         }
     }

@@ -5,6 +5,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,7 +26,15 @@ data class Settings(
     val maxDownloads: Int = 3,
     /** Downloads cut by a crash, reboot or the system killing Pull continue on their own. */
     val autoResume: Boolean = true,
+    val torrentSequential: Boolean = false,
+    val ytdlpChannel: String = "STABLE",
+    val ytdlpAutoUpdate: Boolean = true,
+    val ytdlpLastCheck: Long = 0,
 )
+
+/** A saved set of extra yt-dlp arguments (Seal's "custom command" templates). */
+@Serializable
+data class CommandTemplate(val id: Long, val name: String, val args: String)
 
 private val Context.store by preferencesDataStore("settings")
 
@@ -35,6 +46,11 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val connections = intPreferencesKey("connections")
         val maxDownloads = intPreferencesKey("max_downloads")
         val autoResume = booleanPreferencesKey("auto_resume")
+        val torrentSequential = booleanPreferencesKey("torrent_sequential")
+        val ytdlpChannel = stringPreferencesKey("ytdlp_channel")
+        val ytdlpAutoUpdate = booleanPreferencesKey("ytdlp_auto_update")
+        val ytdlpLastCheck = longPreferencesKey("ytdlp_last_check")
+        val templates = stringPreferencesKey("command_templates")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -44,8 +60,18 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             connections = p[Keys.connections] ?: 8,
             maxDownloads = p[Keys.maxDownloads] ?: 3,
             autoResume = p[Keys.autoResume] ?: true,
+            torrentSequential = p[Keys.torrentSequential] ?: false,
+            ytdlpChannel = p[Keys.ytdlpChannel] ?: "STABLE",
+            ytdlpAutoUpdate = p[Keys.ytdlpAutoUpdate] ?: true,
+            ytdlpLastCheck = p[Keys.ytdlpLastCheck] ?: 0,
         )
     }
+
+    val templates: Flow<List<CommandTemplate>> = context.store.data.map { p ->
+        p[Keys.templates]?.let { runCatching { Json.decodeFromString<List<CommandTemplate>>(it) }.getOrNull() } ?: DEFAULT_TEMPLATES
+    }
+
+    suspend fun saveTemplates(list: List<CommandTemplate>) = set(Keys.templates, Json.encodeToString(list))
 
     suspend fun current(): Settings = settings.first()
 
@@ -56,4 +82,17 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setConnections(n: Int) = set(Keys.connections, n.coerceIn(1, 32))
     suspend fun setMaxDownloads(n: Int) = set(Keys.maxDownloads, n.coerceIn(1, 10))
     suspend fun setAutoResume(on: Boolean) = set(Keys.autoResume, on)
+    suspend fun setTorrentSequential(on: Boolean) = set(Keys.torrentSequential, on)
+    suspend fun setYtdlpChannel(channel: String) = set(Keys.ytdlpChannel, channel)
+    suspend fun setYtdlpAutoUpdate(on: Boolean) = set(Keys.ytdlpAutoUpdate, on)
+    suspend fun setYtdlpLastCheck(at: Long) = set(Keys.ytdlpLastCheck, at)
+
+    companion object {
+        /** Starter templates; the user edits or deletes them on the Command templates screen. */
+        val DEFAULT_TEMPLATES = listOf(
+            CommandTemplate(1, "Embed subtitles & thumbnail", "--embed-subs --sub-langs all,-live_chat --embed-thumbnail --embed-metadata"),
+            CommandTemplate(2, "Audio as MP3", "-x --audio-format mp3 --audio-quality 0 --embed-thumbnail"),
+            CommandTemplate(3, "Split by chapters", "--split-chapters"),
+        )
+    }
 }
