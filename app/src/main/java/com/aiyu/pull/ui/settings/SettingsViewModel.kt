@@ -22,4 +22,7 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setConnections(n: Int) = viewModelScope.launch { repo.setConnections(n) }
     fun setMaxDownloads(n: Int) = viewModelScope.launch { repo.setMaxDownloads(n) }
     fun setAutoResume(on: Boolean) = viewModelScope.launch { repo.setAutoResume(on) }
+
+    /** Any other setter, so each new option does not need its own pass-through here. */
+    fun update(block: suspend SettingsRepository.() -> Unit) = viewModelScope.launch { repo.block() }
 }

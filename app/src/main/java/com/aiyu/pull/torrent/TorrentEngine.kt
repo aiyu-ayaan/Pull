@@ -7,6 +7,9 @@ import android.os.Build
 import android.os.Environment
 import com.aiyu.pull.data.DownloadDao
 import com.aiyu.pull.data.DownloadEntity
+import com.aiyu.pull.data.Encryption
+import com.aiyu.pull.data.Settings
+import com.aiyu.pull.data.SettingsRepository
 import com.aiyu.pull.download.FileStore
 import com.aiyu.pull.download.PeerLive
 import com.aiyu.pull.download.TorrentCommand
@@ -17,7 +20,10 @@ import com.aiyu.pull.download.Transfer
 import com.aiyu.pull.engine.Progress
 import com.aiyu.pull.engine.RemoteInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -34,6 +40,7 @@ import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.TorrentHandle
 import org.libtorrent4j.TorrentInfo
 import org.libtorrent4j.TorrentStatus
+import org.libtorrent4j.swig.settings_pack
 import org.libtorrent4j.swig.torrent_flags_t
 import java.io.File
 import java.io.IOException
@@ -52,21 +59,50 @@ class TorrentEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: DownloadDao,
     private val files: FileStore,
+    settings: SettingsRepository,
 ) {
     val session = SessionManager(false)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
+    @Volatile private var latest = Settings()
+
+    init {
+        // Settings changes apply to a running session at once; a stopped one picks them up when it starts.
+        scope.launch {
+            settings.settings.collect { s ->
+                latest = s
+                synchronized(lock) { if (session.isRunning) session.applySettings(pack(s)) }
+            }
+        }
+    }
     private val torrentsDir = File(context.filesDir, "torrents").apply { mkdirs() }
     private val tempDir = File(context.cacheDir, "magnet").apply { mkdirs() }
 
     fun ensureStarted() = synchronized(lock) {
         if (session.isRunning) return
-        val pack = SettingsPack().apply {
-            setEnableDht(true)
-            setEnableLsd(true)
-            connectionsLimit(200)
-            activeDownloads(10)
-        }
-        session.start(SessionParams(pack))
+        session.start(SessionParams(pack(latest)))
+    }
+
+    private fun pack(s: Settings) = SettingsPack().apply {
+        setEnableDht(s.torrentDht)
+        setEnableLsd(s.torrentLsd)
+        setBoolean(settings_pack.bool_types.enable_outgoing_utp.swigValue(), s.torrentUtp)
+        setBoolean(settings_pack.bool_types.enable_incoming_utp.swigValue(), s.torrentUtp)
+        setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), s.torrentPortMapping)
+        setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), s.torrentPortMapping)
+        val enc = when (s.torrentEncryption) {
+            Encryption.ENABLED -> settings_pack.enc_policy.pe_enabled
+            Encryption.FORCED -> settings_pack.enc_policy.pe_forced
+            Encryption.DISABLED -> settings_pack.enc_policy.pe_disabled
+        }.swigValue()
+        setInteger(settings_pack.int_types.out_enc_policy.swigValue(), enc)
+        setInteger(settings_pack.int_types.in_enc_policy.swigValue(), enc)
+        connectionsLimit(s.torrentConnections)
+        // Pull's own queue decides how many downloads run; libtorrent must not queue them a second time.
+        activeDownloads(-1)
+        activeLimit(-1)
+        downloadRateLimit(s.torrentDownLimit * 1024)
+        uploadRateLimit(s.torrentUpLimit * 1024)
     }
 
     fun parse(bytes: ByteArray): TorrentMeta {

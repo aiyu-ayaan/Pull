@@ -79,6 +79,7 @@ import kotlinx.serialization.json.Json
 
 @Serializable data object MainRoute
 @Serializable data object SettingsRoute
+@Serializable data class SettingsPageRoute(val page: com.aiyu.pull.ui.settings.SettingsPage)
 @Serializable data class DetailsRoute(val id: Long)
 
 /** Something an Intent asked for: open a download (notification tap) or add a shared link. */
@@ -110,7 +111,7 @@ fun PullAppShell(event: AppEvent?, onEventHandled: () -> Unit) {
     var adding by rememberSaveable(stateSaver = addSaver) { mutableStateOf(null) }
 
     val onMain = entry?.destination?.hasRoute<MainRoute>() != false
-    val onSettings = entry?.destination?.hasRoute<SettingsRoute>() == true
+    val onSettings = entry?.destination?.let { it.hasRoute<SettingsRoute>() || it.hasRoute<SettingsPageRoute>() } == true
     val badges = rows.orEmpty().let { list ->
         mapOf(Tab.ACTIVE to list.count { it.status == Status.RUNNING || it.status == Status.FAILED })
     }
@@ -178,7 +179,10 @@ fun PullAppShell(event: AppEvent?, onEventHandled: () -> Unit) {
                     onOpenPage = openBrowser,
                 )
             }
-            composable<SettingsRoute> { SettingsScreen(hiltViewModel(), onBack = { nav.popBackStack() }) }
+            composable<SettingsRoute> { SettingsScreen(onBack = { nav.popBackStack() }, onPage = { nav.navigate(SettingsPageRoute(it)) }) }
+            composable<SettingsPageRoute> { back ->
+                com.aiyu.pull.ui.settings.SettingsPageScreen(back.toRoute<SettingsPageRoute>().page, hiltViewModel(), onBack = { nav.popBackStack() })
+            }
         }
     }
 

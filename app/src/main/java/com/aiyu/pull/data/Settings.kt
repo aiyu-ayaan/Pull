@@ -30,7 +30,19 @@ data class Settings(
     val ytdlpChannel: String = "STABLE",
     val ytdlpAutoUpdate: Boolean = true,
     val ytdlpLastCheck: Long = 0,
+    val torrentDht: Boolean = true,
+    val torrentLsd: Boolean = true,
+    val torrentUtp: Boolean = true,
+    val torrentPortMapping: Boolean = true,
+    val torrentEncryption: Encryption = Encryption.ENABLED,
+    /** KB/s for all torrents together; 0 = unlimited. */
+    val torrentDownLimit: Int = 0,
+    val torrentUpLimit: Int = 0,
+    val torrentConnections: Int = 200,
 )
+
+/** BitTorrent protocol encryption: allow both, require it, or never use it. */
+enum class Encryption { ENABLED, FORCED, DISABLED }
 
 /** A saved set of extra yt-dlp arguments (Seal's "custom command" templates). */
 @Serializable
@@ -51,6 +63,14 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val ytdlpAutoUpdate = booleanPreferencesKey("ytdlp_auto_update")
         val ytdlpLastCheck = longPreferencesKey("ytdlp_last_check")
         val templates = stringPreferencesKey("command_templates")
+        val torrentDht = booleanPreferencesKey("torrent_dht")
+        val torrentLsd = booleanPreferencesKey("torrent_lsd")
+        val torrentUtp = booleanPreferencesKey("torrent_utp")
+        val torrentPortMapping = booleanPreferencesKey("torrent_port_mapping")
+        val torrentEncryption = stringPreferencesKey("torrent_encryption")
+        val torrentDownLimit = intPreferencesKey("torrent_down_limit")
+        val torrentUpLimit = intPreferencesKey("torrent_up_limit")
+        val torrentConnections = intPreferencesKey("torrent_connections")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -64,6 +84,14 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             ytdlpChannel = p[Keys.ytdlpChannel] ?: "STABLE",
             ytdlpAutoUpdate = p[Keys.ytdlpAutoUpdate] ?: true,
             ytdlpLastCheck = p[Keys.ytdlpLastCheck] ?: 0,
+            torrentDht = p[Keys.torrentDht] ?: true,
+            torrentLsd = p[Keys.torrentLsd] ?: true,
+            torrentUtp = p[Keys.torrentUtp] ?: true,
+            torrentPortMapping = p[Keys.torrentPortMapping] ?: true,
+            torrentEncryption = p[Keys.torrentEncryption]?.let { runCatching { Encryption.valueOf(it) }.getOrNull() } ?: Encryption.ENABLED,
+            torrentDownLimit = p[Keys.torrentDownLimit] ?: 0,
+            torrentUpLimit = p[Keys.torrentUpLimit] ?: 0,
+            torrentConnections = p[Keys.torrentConnections] ?: 200,
         )
     }
 
@@ -86,6 +114,14 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setYtdlpChannel(channel: String) = set(Keys.ytdlpChannel, channel)
     suspend fun setYtdlpAutoUpdate(on: Boolean) = set(Keys.ytdlpAutoUpdate, on)
     suspend fun setYtdlpLastCheck(at: Long) = set(Keys.ytdlpLastCheck, at)
+    suspend fun setTorrentDht(on: Boolean) = set(Keys.torrentDht, on)
+    suspend fun setTorrentLsd(on: Boolean) = set(Keys.torrentLsd, on)
+    suspend fun setTorrentUtp(on: Boolean) = set(Keys.torrentUtp, on)
+    suspend fun setTorrentPortMapping(on: Boolean) = set(Keys.torrentPortMapping, on)
+    suspend fun setTorrentEncryption(e: Encryption) = set(Keys.torrentEncryption, e.name)
+    suspend fun setTorrentDownLimit(kb: Int) = set(Keys.torrentDownLimit, kb.coerceAtLeast(0))
+    suspend fun setTorrentUpLimit(kb: Int) = set(Keys.torrentUpLimit, kb.coerceAtLeast(0))
+    suspend fun setTorrentConnections(n: Int) = set(Keys.torrentConnections, n.coerceIn(20, 500))
 
     companion object {
         /** Starter templates; the user edits or deletes them on the Command templates screen. */
