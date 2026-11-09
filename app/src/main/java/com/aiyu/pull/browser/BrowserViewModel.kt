@@ -1,4 +1,4 @@
-package com.aiyu.pull.ui.browser
+package com.aiyu.pull.browser
 
 import androidx.lifecycle.ViewModel
 import com.aiyu.pull.data.DownloadEntity

@@ -15,10 +15,32 @@
         <item quantity="one">%d download</item>
         <item quantity="other">%d downloads</item>
     </plurals>
-    <string name="filter_all">All</string>
-    <string name="filter_active">In progress</string>
-    <string name="filter_done">Completed</string>
-    <string name="filter_failed">Failed</string>
+    <string name="tab_active">Active</string>
+    <string name="tab_done">Downloaded</string>
+    <string name="title_active">Active</string>
+    <string name="title_done">Downloaded</string>
+    <string name="kind_all">All types</string>
+    <string name="kind_video">Video</string>
+    <string name="kind_audio">Audio</string>
+    <string name="kind_document">Documents</string>
+    <string name="kind_archive">Archives</string>
+    <string name="kind_apk">Apps</string>
+    <string name="kind_image">Images</string>
+    <string name="kind_other">Other</string>
+    <string name="cd_open_drawer">Open menu</string>
+    <string name="drawer_subtitle">Fast download manager</string>
+    <string name="drawer_section_add">Add downloads</string>
+    <string name="cd_opens_separately">Opens in its own window</string>
+    <string name="browser_app_name">Pull Browser</string>
+    <string name="browser_link_updated">New link found. Resuming the download.</string>
+    <string name="browser_added">Added to Pull</string>
+    <string name="empty_done_title">No finished downloads yet</string>
+    <string name="day_today">Today</string>
+    <string name="day_yesterday">Yesterday</string>
+    <plurals name="live_summary">
+        <item quantity="one">%1$d download · %2$d connections</item>
+        <item quantity="other">%1$d downloads · %2$d connections</item>
+    </plurals>
     <string name="empty_title">Nothing downloading</string>
     <string name="empty_filtered">Nothing here</string>
     <string name="empty_body">Add a link, paste one, or open the browser and tap any download.</string>
@@ -141,6 +163,7 @@
         <item quantity="one">Downloading %d file</item>
         <item quantity="other">Downloading %d files</item>
     </plurals>
+    <string name="notif_detail">%1$s · %2$d connections</string>
     <string name="notif_completed">Download complete · %s</string>
     <string name="notif_failed">Download failed</string>
     <string name="notif_link_expired">Link expired · tap to get a new one</string>

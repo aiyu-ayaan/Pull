@@ -88,6 +88,14 @@ import com.aiyu.pull.R
 import com.aiyu.pull.data.Status
 import com.aiyu.pull.engine.ErrorKind
 import com.aiyu.pull.ui.components.FileKind
+import com.aiyu.pull.ui.components.MenuIcon
+import com.aiyu.pull.ui.components.SpeedGraph
+import com.aiyu.pull.ui.components.openFile
+import com.aiyu.pull.ui.theme.NumberTextStyle
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material3.FilledTonalIconButton
+import com.aiyu.pull.ui.navigation.LocalBottomBarInsets
+import com.aiyu.pull.ui.navigation.Tab
 import com.aiyu.pull.ui.components.MorphingShape
 import com.aiyu.pull.ui.components.ShapeIcon
 import com.aiyu.pull.ui.components.heroBrush
@@ -101,21 +109,35 @@ import com.aiyu.pull.ui.speakSpeed
 import com.aiyu.pull.ui.theme.Dimens
 import kotlinx.coroutines.launch
 
-enum class Filter(val label: Int) { ALL(R.string.filter_all), ACTIVE(R.string.filter_active), DONE(R.string.filter_done), FAILED(R.string.filter_failed) }
+/** Chips under the title: narrow the current tab to one file type. */
+private val kindChips = listOf(
+    null to R.string.kind_all,
+    FileKind.VIDEO to R.string.kind_video,
+    FileKind.AUDIO to R.string.kind_audio,
+    FileKind.DOCUMENT to R.string.kind_document,
+    FileKind.ARCHIVE to R.string.kind_archive,
+    FileKind.APK to R.string.kind_apk,
+    FileKind.IMAGE to R.string.kind_image,
+    FileKind.OTHER to R.string.kind_other,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(
     vm: DownloadsViewModel,
+    tab: Tab,
     onOpen: (Long) -> Unit,
     onAdd: (fromClipboard: Boolean) -> Unit,
     onBrowser: () -> Unit,
+    onOpenDrawer: () -> Unit,
+    drawerProgress: () -> Float,
     selectedId: Long?,
     modifier: Modifier = Modifier,
 ) {
     val rows by vm.downloads.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
-    var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
+    var kind by rememberSaveable { mutableStateOf<FileKind?>(null) }
+    val insets = LocalBottomBarInsets.current
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     // Swiped rows hide at once; the delete only happens when the undo snackbar goes away.
     var hidden by rememberSaveable { mutableStateOf(listOf<Long>()) }
@@ -127,14 +149,7 @@ fun DownloadsScreen(
     BackHandler(menuOpen) { menuOpen = false }
 
     val views = rows.orEmpty().filter { it.id !in hidden }.map { DownloadView(it, live[it.id]) }
-    val shown = views.filter {
-        when (filter) {
-            Filter.ALL -> true
-            Filter.ACTIVE -> it.entity.status == Status.RUNNING || it.entity.status == Status.QUEUED || it.entity.status == Status.PAUSED
-            Filter.DONE -> it.entity.status == Status.COMPLETED
-            Filter.FAILED -> it.entity.status == Status.FAILED
-        }
-    }
+    val shown = views.filter { tab.matches(it.entity.status) && (kind == null || FileKind.of(it.entity.fileName, it.entity.mimeType) == kind) }
     val active = views.count { it.running }
     val totalSpeed = views.sumOf { it.speed }
 
@@ -142,7 +157,12 @@ fun DownloadsScreen(
         modifier = modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection),
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text(stringResource(R.string.downloads_title)) },
+                title = { Text(stringResource(tab.title)) },
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer, shapes = IconButtonDefaults.shapes()) {
+                        MenuIcon(drawerProgress, Modifier.semantics { contentDescription = context.getString(R.string.cd_open_drawer) })
+                    }
+                },
                 subtitle = {
                     // The headline number: aggregate speed, like a desktop download manager's status bar.
                     AnimatedContent(active > 0, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "subtitle") { busy ->
@@ -154,7 +174,8 @@ fun DownloadsScreen(
                                 modifier = Modifier.semantics { contentDescription = speakSpeed(totalSpeed) },
                             )
                         } else {
-                            Text(pluralStringResource(R.plurals.downloads_subtitle_idle, views.size, views.size))
+                            val n = views.count { tab.matches(it.entity.status) }
+                            Text(pluralStringResource(R.plurals.downloads_subtitle_idle, n, n))
                         }
                     }
                 },
@@ -172,6 +193,7 @@ fun DownloadsScreen(
         },
         floatingActionButton = {
             FloatingActionButtonMenu(
+                modifier = Modifier.padding(bottom = insets.fab),
                 expanded = menuOpen,
                 button = {
                     ToggleFloatingActionButton(
@@ -211,23 +233,34 @@ fun DownloadsScreen(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = readableGutter()),
                 horizontalArrangement = Arrangement.spacedBy(Dimens.sm),
             ) {
-                Filter.entries.forEach { f ->
-                    FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(stringResource(f.label)) })
+                kindChips.forEach { (k, label) ->
+                    FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(stringResource(label)) })
                 }
             }
             if (rows != null && shown.isEmpty()) {
-                EmptyState(filter, Modifier.weight(1f))
+                EmptyState(tab, kind == null, Modifier.weight(1f).padding(bottom = insets.content))
                 return@Column
             }
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = readableGutter(), end = readableGutter(), top = Dimens.sm,
-                    bottom = padding.calculateBottomPadding() + 96.dp,
+                    bottom = padding.calculateBottomPadding() + insets.content + 96.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(Dimens.sm),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(shown, key = { it.id }) { view ->
+                if (tab == Tab.ACTIVE && active > 0) item(key = "live") {
+                    LiveHero(views.filter { it.running }, Modifier.animateItem())
+                }
+                val groups = if (tab == Tab.DONE) shown.groupBy { dayLabel(context, it.entity.finishedAt ?: it.entity.createdAt) } else mapOf("" to shown)
+                groups.forEach { (day, group) ->
+                if (day.isNotEmpty()) item(key = "day:$day") {
+                    Text(
+                        day, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.animateItem().padding(start = Dimens.sm, top = Dimens.md),
+                    )
+                }
+                items(group, key = { it.id }) { view ->
                     SwipeToDelete(
                         onDelete = {
                             hidden = hidden + view.id
@@ -249,8 +282,12 @@ fun DownloadsScreen(
                             selected = view.id == selectedId,
                             onClick = { onOpen(view.id) },
                             onToggle = { if (view.running || view.entity.status == Status.QUEUED) vm.pause(view.id) else vm.resume(view.id) },
+                            onOpenFile = {
+                                if (!openFile(context, vm.files, view.entity)) scope.launch { snackbar.showSnackbar(context.getString(R.string.no_app_to_open)) }
+                            },
                         )
                     }
+                }
                 }
             }
         }
@@ -282,7 +319,7 @@ private fun SwipeToDelete(onDelete: () -> Unit, modifier: Modifier = Modifier, c
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DownloadRow(view: DownloadView, selected: Boolean, onClick: () -> Unit, onToggle: () -> Unit) {
+private fun DownloadRow(view: DownloadView, selected: Boolean, onClick: () -> Unit, onToggle: () -> Unit, onOpenFile: () -> Unit) {
     val e = view.entity
     val kind = FileKind.of(e.fileName, e.mimeType)
     val tone = kind.tone
@@ -317,7 +354,9 @@ private fun DownloadRow(view: DownloadView, selected: Boolean, onClick: () -> Un
                     Status.FAILED -> IconButton(onClick = onToggle, shapes = IconButtonDefaults.shapes()) {
                         Icon(Icons.Rounded.Refresh, stringResource(R.string.action_retry))
                     }
-                    Status.COMPLETED -> Unit
+                    Status.COMPLETED -> FilledTonalIconButton(onClick = onOpenFile, shapes = IconButtonDefaults.shapes()) {
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, stringResource(R.string.action_open))
+                    }
                 }
             }
             if (e.status != Status.COMPLETED) {
@@ -380,7 +419,7 @@ private fun StatusLine(view: DownloadView) {
 }
 
 @Composable
-private fun EmptyState(filter: Filter, modifier: Modifier) {
+private fun EmptyState(tab: Tab, everything: Boolean, modifier: Modifier) {
     Column(
         modifier.fillMaxWidth().padding(Dimens.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -389,10 +428,16 @@ private fun EmptyState(filter: Filter, modifier: Modifier) {
         MorphingShape(brush = heroBrush(), modifier = Modifier.size(120.dp))
         Spacer(Modifier.height(Dimens.xl))
         Text(
-            stringResource(if (filter == Filter.ALL) R.string.empty_title else R.string.empty_filtered),
+            stringResource(
+                when {
+                    !everything -> R.string.empty_filtered
+                    tab == Tab.DONE -> R.string.empty_done_title
+                    else -> R.string.empty_title
+                },
+            ),
             style = MaterialTheme.typography.headlineSmall,
         )
-        if (filter == Filter.ALL) {
+        if (everything && tab == Tab.ACTIVE) {
             Spacer(Modifier.height(Dimens.sm))
             Text(
                 stringResource(R.string.empty_body),
@@ -402,4 +447,52 @@ private fun EmptyState(filter: Filter, modifier: Modifier) {
             )
         }
     }
+}
+
+/**
+ * Top of the Active screen: everything running, summed. One big live number, the minute's speed curve and the
+ * combined wavy bar. Desktop download managers make speed the headline; so does this.
+ */
+@Composable
+private fun LiveHero(running: List<DownloadView>, modifier: Modifier = Modifier) {
+    val c = MaterialTheme.colorScheme
+    val speed by rememberGlide(running.sumOf { it.speed })
+    val downloaded by rememberGlide(running.sumOf { it.downloaded })
+    val total = if (running.any { it.total <= 0 }) -1 else running.sumOf { it.total }
+    val connections = running.sumOf { v -> v.live?.segments?.count { it.active } ?: 0 }
+    // Per-second speed of all downloads added together, aligned on "now".
+    val histories = running.mapNotNull { it.live?.history }
+    val length = histories.maxOfOrNull { it.size } ?: 0
+    val history = List(length) { i -> histories.sumOf { h -> h.getOrNull(h.size - length + i) ?: 0L } }
+    Surface(shape = MaterialTheme.shapes.extraLarge, color = c.primaryContainer, modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Dimens.xl)) {
+            Text(
+                formatSpeed(speed),
+                style = NumberTextStyle,
+                color = c.onPrimaryContainer,
+                modifier = Modifier.semantics { contentDescription = speakSpeed(speed) },
+            )
+            Text(
+                pluralStringResource(R.plurals.live_summary, running.size, running.size, connections),
+                style = MaterialTheme.typography.titleMedium, color = c.onPrimaryContainer,
+            )
+            Spacer(Modifier.height(Dimens.md))
+            SpeedGraph(history)
+            Spacer(Modifier.height(Dimens.md))
+            if (total > 0) {
+                LinearWavyProgressIndicator(progress = { (downloaded.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(Dimens.xs))
+                Text(
+                    stringResource(R.string.details_of, formatBytes(downloaded), formatBytes(total)),
+                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"), color = c.onPrimaryContainer,
+                )
+            } else LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+        }
+    }
+}
+
+private fun dayLabel(context: android.content.Context, millis: Long): String = when {
+    android.text.format.DateUtils.isToday(millis) -> context.getString(R.string.day_today)
+    android.text.format.DateUtils.isToday(millis + android.text.format.DateUtils.DAY_IN_MILLIS) -> context.getString(R.string.day_yesterday)
+    else -> android.text.format.DateUtils.formatDateTime(context, millis, android.text.format.DateUtils.FORMAT_SHOW_DATE)
 }

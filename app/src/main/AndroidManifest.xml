@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- usesCleartextTraffic: plain http:// download links are common and must work, as in any download manager. -->
     <application
         android:name=".PullApp"
         android:allowBackup="true"
@@ -19,6 +20,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Pull"
         tools:targetApi="36">
 
@@ -39,6 +41,16 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- Own task: shows in Recents as a separate "Pull Browser" window, like its own app. -->
+        <activity
+            android:name=".browser.BrowserActivity"
+            android:exported="false"
+            android:label="@string/browser_app_name"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}.browser"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
 
         <service
             android:name=".service.DownloadService"

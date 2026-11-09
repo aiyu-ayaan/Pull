@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.RemoteViews
+import java.util.Locale
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -37,20 +39,34 @@ class Notifier @Inject constructor(@ApplicationContext private val context: Cont
         )
     }
 
-    /** The service's single ongoing notification: all active downloads summed. */
-    fun ongoing(count: Int, title: String?, downloaded: Long, total: Long, speed: Long): Notification {
-        val percent = if (total > 0) (downloaded * 100 / total).toInt() else 0
+    /**
+     * The service's single ongoing notification: all active downloads summed. A custom view keeps Pull's wavy
+     * progress bar in the shade; the wave is a bitmap whose phase shifts on every (1 Hz) update, so it crawls.
+     */
+    fun ongoing(count: Int, title: String?, downloaded: Long, total: Long, speed: Long, connections: Int): Notification {
+        val fraction = if (total > 0) (downloaded.toDouble() / total).toFloat().coerceIn(0f, 1f) else -1f
+        val percent = if (fraction >= 0) String.format(Locale.getDefault(), "%.1f%%", fraction * 100) else ""
         val eta = if (total > 0 && speed > 0) formatDuration((total - downloaded) / speed) else null
-        val text = listOfNotNull(
-            formatSpeed(speed),
-            if (total > 0) "$percent%" else formatBytes(downloaded),
-            eta?.let { context.getString(R.string.eta_left, it) },
-        ).joinToString(" · ")
+        val line = listOfNotNull(formatSpeed(speed), eta?.let { context.getString(R.string.eta_left, it) }).joinToString(" · ")
+        val name = if (count <= 1 && title != null) title else context.resources.getQuantityString(R.plurals.notif_downloading, count, count)
+        val sizes = if (total > 0) context.getString(R.string.details_of, formatBytes(downloaded), formatBytes(total)) else formatBytes(downloaded)
+        val detail = context.getString(R.string.notif_detail, sizes, connections)
+        val wave = WaveBitmap.draw(context, fraction)
+        fun views(layout: Int) = RemoteViews(context.packageName, layout).apply {
+            setTextViewText(R.id.title, name)
+            setTextViewText(R.id.percent, percent)
+            setTextViewText(R.id.line, line)
+            setImageViewBitmap(R.id.wave, wave)
+            if (layout == R.layout.notif_progress_big) setTextViewText(R.id.detail, detail)
+        }
         return NotificationCompat.Builder(context, CH_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_pull)
-            .setContentTitle(if (count <= 1 && title != null) title else context.resources.getQuantityString(R.plurals.notif_downloading, count, count))
-            .setContentText(text)
-            .setProgress(100, percent, total <= 0)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(views(R.layout.notif_progress))
+            .setCustomBigContentView(views(R.layout.notif_progress_big))
+            // Plain fields still feed accessibility, the lock screen and watches.
+            .setContentTitle(name)
+            .setContentText(listOf(percent, line).filter { it.isNotEmpty() }.joinToString(" · "))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)

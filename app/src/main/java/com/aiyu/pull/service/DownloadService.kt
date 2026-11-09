@@ -43,7 +43,7 @@ class DownloadService : Service() {
             Build.VERSION.SDK_INT >= 29 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             else -> 0
         }
-        ServiceCompat.startForeground(this, Notifier.ONGOING_ID, notifier.ongoing(1, null, 0, 0, 0), type)
+        ServiceCompat.startForeground(this, Notifier.ONGOING_ID, notifier.ongoing(1, null, 0, 0, 0, 0), type)
         if (!observing) {
             observing = true
             acquireWakeLock()
@@ -54,7 +54,8 @@ class DownloadService : Service() {
                         if (live.isEmpty()) return@collect
                         val name = rows.firstOrNull { it.id in live }?.fileName
                         val total = if (live.values.any { it.totalBytes <= 0 }) -1 else live.values.sumOf { it.totalBytes }
-                        val n = notifier.ongoing(live.size, name, live.values.sumOf { it.downloadedBytes }, total, live.values.sumOf { it.bytesPerSecond })
+                        val connections = live.values.sumOf { l -> l.segments.count { it.active } }
+                        val n = notifier.ongoing(live.size, name, live.values.sumOf { it.downloadedBytes }, total, live.values.sumOf { it.bytesPerSecond }, connections)
                         runCatching { androidx.core.app.NotificationManagerCompat.from(this@DownloadService).notify(Notifier.ONGOING_ID, n) }
                     }
             }

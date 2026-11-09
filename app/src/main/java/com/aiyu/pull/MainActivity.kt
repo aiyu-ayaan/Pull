@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
         val id = intent.getLongExtra(EXTRA_DOWNLOAD_ID, -1)
         when {
             id >= 0 -> event = AppEvent.OpenDownload(id)
-            intent.action == Intent.ACTION_SEND -> firstUrl(intent.getStringExtra(Intent.EXTRA_TEXT))?.let { event = AppEvent.Add(it) }
+            intent.action == Intent.ACTION_SEND -> firstUrl(intent.getStringExtra(Intent.EXTRA_TEXT))?.let { event = AppEvent.Add(com.aiyu.pull.ui.add.AddRequest(it)) }
         }
     }
 

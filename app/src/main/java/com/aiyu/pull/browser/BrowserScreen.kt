@@ -1,4 +1,4 @@
-package com.aiyu.pull.ui.browser
+package com.aiyu.pull.browser
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap

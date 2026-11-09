@@ -12,6 +12,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -42,13 +47,23 @@ import com.aiyu.pull.ui.components.readableGutter
 import com.aiyu.pull.ui.theme.Dimens
 
 @Composable
-fun SettingsScreen(vm: SettingsViewModel, modifier: Modifier = Modifier) {
+fun SettingsScreen(vm: SettingsViewModel, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val s by vm.settings.collectAsStateWithLifecycle()
     val settings = s ?: return
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection),
-        topBar = { LargeFlexibleTopAppBar(title = { Text(stringResource(R.string.settings_title)) }, scrollBehavior = scroll) },
+        topBar = {
+            LargeFlexibleTopAppBar(
+                title = { Text(stringResource(R.string.settings_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack, shapes = IconButtonDefaults.shapes()) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_back))
+                    }
+                },
+                scrollBehavior = scroll,
+            )
+        },
     ) { padding ->
         LazyColumn(
             contentPadding = PaddingValues(
