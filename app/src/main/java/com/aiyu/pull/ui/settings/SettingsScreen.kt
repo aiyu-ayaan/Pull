@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Icon
@@ -75,15 +76,24 @@ import com.aiyu.pull.ui.components.ShapeIcon
 import com.aiyu.pull.ui.components.readableGutter
 import com.aiyu.pull.ui.theme.Dimens
 import kotlinx.serialization.Serializable
+import androidx.compose.runtime.DisposableEffect
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.aiyu.pull.update.UpdateChannel
+import com.aiyu.pull.ui.update.UpdateStatus
+import com.aiyu.pull.ui.update.UpdateViewModel
+import com.aiyu.pull.ui.update.detailRes
+import com.aiyu.pull.ui.update.labelRes
 
 /** Categories of the settings home, each its own page (Android Settings: home list, then a page per subject). */
 @Serializable
-enum class SettingsPage(val title: Int, val summary: Int) {
+enum class SettingsPage(val title: Int, val summary: Int, val onHome: Boolean = true) {
     DOWNLOADS(R.string.settings_downloads, R.string.settings_downloads_summary),
     TORRENTS(R.string.settings_torrents, R.string.settings_torrents_summary),
     VIDEO(R.string.settings_video, R.string.settings_video_summary),
     APPEARANCE(R.string.settings_appearance, R.string.settings_appearance_summary),
+    UPDATES(R.string.settings_updates, R.string.settings_updates_summary),
     ABOUT(R.string.settings_about, R.string.settings_about_summary),
+    ACKNOWLEDGEMENTS(R.string.about_acknowledgements, R.string.about_acknowledgements_desc, onHome = false),
 }
 
 private data class PageLook(val icon: ImageVector, val shape: RoundedPolygon, val container: Color, val content: Color)
@@ -96,7 +106,8 @@ private fun SettingsPage.look(): PageLook {
         SettingsPage.TORRENTS -> PageLook(Icons.Rounded.Hub, MaterialShapes.Clover4Leaf, c.tertiaryContainer, c.onTertiaryContainer)
         SettingsPage.VIDEO -> PageLook(Icons.Rounded.SmartDisplay, MaterialShapes.Sunny, c.secondaryContainer, c.onSecondaryContainer)
         SettingsPage.APPEARANCE -> PageLook(Icons.Rounded.Palette, MaterialShapes.Cookie7Sided, c.primaryContainer, c.onPrimaryContainer)
-        SettingsPage.ABOUT -> PageLook(Icons.Rounded.Info, MaterialShapes.Circle, c.surfaceContainerHighest, c.onSurfaceVariant)
+        SettingsPage.UPDATES -> PageLook(Icons.Rounded.SystemUpdate, MaterialShapes.Gem, c.secondaryContainer, c.onSecondaryContainer)
+        SettingsPage.ABOUT, SettingsPage.ACKNOWLEDGEMENTS -> PageLook(Icons.Rounded.Info, MaterialShapes.Circle, c.surfaceContainerHighest, c.onSurfaceVariant)
     }
 }
 
@@ -106,7 +117,7 @@ fun SettingsScreen(onBack: () -> Unit, onPage: (SettingsPage) -> Unit, modifier:
     SettingsScaffold(stringResource(R.string.settings_title), onBack, modifier) {
         item {
             Group {
-                SettingsPage.entries.forEach { page ->
+                SettingsPage.entries.filter { it.onHome }.forEach { page ->
                     val look = page.look()
                     ListItem(
                         headlineContent = { Text(stringResource(page.title)) },
@@ -124,7 +135,7 @@ fun SettingsScreen(onBack: () -> Unit, onPage: (SettingsPage) -> Unit, modifier:
 
 /** One category's options. */
 @Composable
-fun SettingsPageScreen(page: SettingsPage, vm: SettingsViewModel, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun SettingsPageScreen(page: SettingsPage, vm: SettingsViewModel, onBack: () -> Unit, onPage: (SettingsPage) -> Unit, modifier: Modifier = Modifier) {
     val s by vm.settings.collectAsStateWithLifecycle()
     val settings = s ?: return
     SettingsScaffold(stringResource(page.title), onBack, modifier) {
@@ -133,20 +144,9 @@ fun SettingsPageScreen(page: SettingsPage, vm: SettingsViewModel, onBack: () -> 
             SettingsPage.TORRENTS -> torrents(settings, vm)
             SettingsPage.VIDEO -> video(settings, vm)
             SettingsPage.APPEARANCE -> appearance(settings, vm)
-            SettingsPage.ABOUT -> item {
-                Group {
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.app_name)) },
-                        supportingContent = { Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME)) },
-                        colors = itemColors(),
-                    )
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_license)) },
-                        supportingContent = { Text(stringResource(R.string.settings_license_summary)) },
-                        colors = itemColors(),
-                    )
-                }
-            }
+            SettingsPage.UPDATES -> updates()
+            SettingsPage.ABOUT -> about(onOpenAcknowledgements = { onPage(SettingsPage.ACKNOWLEDGEMENTS) })
+            SettingsPage.ACKNOWLEDGEMENTS -> acknowledgements()
         }
     }
 }
@@ -255,6 +255,52 @@ private fun LazyListScope.video(s: Settings, vm: SettingsViewModel) {
     }
 }
 
+/** Settings → Updates: what's running, what's available, whether to look automatically, and which releases to accept. */
+private fun LazyListScope.updates() {
+    item {
+        val vm = hiltViewModel<UpdateViewModel>()
+        val settings by vm.settings.collectAsStateWithLifecycle()
+        val s = settings ?: return@item
+        DisposableEffect(Unit) {
+            vm.offerShownInline.value = true
+            onDispose { vm.offerShownInline.value = false }
+        }
+        val channel = s.updateChannel ?: vm.channel
+        Column(verticalArrangement = Arrangement.spacedBy(Dimens.md)) {
+            Group { UpdateStatus(vm, s.updateLastChecked) { at -> java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault()).format(whenFormat) } }
+            Section(R.string.update_automatic) {
+                SwitchItem(R.string.update_check_automatically, R.string.update_automatic_desc, s.updatesEnabled, vm::setEnabled)
+            }
+            Section(R.string.update_channel) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Dimens.lg, vertical = Dimens.sm).selectableGroup(),
+                ) {
+                    val all = UpdateChannel.entries
+                    all.forEachIndexed { i, ch ->
+                        ToggleButton(
+                            checked = channel == ch,
+                            onCheckedChange = { vm.setChannel(ch) },
+                            shapes = when (i) {
+                                0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                all.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                                else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                            },
+                            modifier = Modifier.weight(1f).heightIn(min = Dimens.minTouch).semantics { role = Role.RadioButton },
+                        ) { Text(stringResource(ch.labelRes)) }
+                    }
+                }
+                Text(
+                    stringResource(channel.detailRes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Dimens.lg, vertical = Dimens.sm),
+                )
+            }
+        }
+    }
+}
+
+private val whenFormat = java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT)
+
 private fun LazyListScope.appearance(s: Settings, vm: SettingsViewModel) {
     item {
         Section(R.string.settings_theme) {
@@ -314,18 +360,18 @@ private fun SettingsScaffold(title: String, onBack: () -> Unit, modifier: Modifi
 }
 
 @Composable
-private fun itemColors() = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+internal fun itemColors() = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
 
 /** Rounded group of rows, like the grouped cards of Android 16 Settings. */
 @Composable
-private fun Group(content: @Composable () -> Unit) {
+internal fun Group(content: @Composable () -> Unit) {
     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.padding(vertical = Dimens.sm)) { content() }
     }
 }
 
 @Composable
-private fun Section(title: Int, content: @Composable () -> Unit) {
+internal fun Section(title: Int, content: @Composable () -> Unit) {
     Column {
         Text(
             stringResource(title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,

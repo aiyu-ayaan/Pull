@@ -22,6 +22,11 @@ import com.aiyu.pull.ui.settings.SettingsViewModel
 import com.aiyu.pull.ui.theme.PullTheme
 import com.aiyu.pull.ui.theme.WithClickHaptics
 import dagger.hilt.android.AndroidEntryPoint
+import androidx.lifecycle.lifecycleScope
+import com.aiyu.pull.ui.update.UpdateHost
+import com.aiyu.pull.update.AppUpdater
+import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 /** `drawable/splash_mark` runs 960ms; the system starts it with the process, so hold the first frame until then. */
 private const val SPLASH_MS = 960L
@@ -29,6 +34,7 @@ private const val SPLASH_MS = 960L
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val settingsVm: SettingsViewModel by viewModels()
+    @Inject lateinit var updater: AppUpdater
     private var event by mutableStateOf<AppEvent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,13 +50,17 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         // A recreated activity (rotation, process death) already handled its launch intent.
-        if (savedInstanceState == null) handle(intent)
+        if (savedInstanceState == null) {
+            handle(intent)
+            lifecycleScope.launch { updater.check() } // silent: rate-limited, honours the switch and snooze
+        }
         setContent {
             val settings by settingsVm.settings.collectAsStateWithLifecycle()
             val s = settings ?: return@setContent
             PullTheme(s.themeMode, s.dynamicColor) {
                 WithClickHaptics {
                     PullAppShell(event, onEventHandled = { event = null })
+                    UpdateHost()
                 }
             }
         }

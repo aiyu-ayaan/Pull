@@ -10,6 +10,8 @@
     <!-- API 29-33 path. Android 15 caps dataSync at 6 h a day, so API 34+ uses specialUse. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Self-update: lets the user allow Pull to hand a downloaded APK to Android's installer (the system confirmation screen is never skipped). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- usesCleartextTraffic: plain http:// download links are common and must work, as in any download manager. -->
     <application
@@ -90,6 +92,10 @@
 
         <receiver
             android:name=".service.NotificationActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
             android:exported="false" />
 
         <provider

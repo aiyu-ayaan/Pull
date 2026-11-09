@@ -181,7 +181,7 @@ fun PullAppShell(event: AppEvent?, onEventHandled: () -> Unit) {
             }
             composable<SettingsRoute> { SettingsScreen(onBack = { nav.popBackStack() }, onPage = { nav.navigate(SettingsPageRoute(it)) }) }
             composable<SettingsPageRoute> { back ->
-                com.aiyu.pull.ui.settings.SettingsPageScreen(back.toRoute<SettingsPageRoute>().page, hiltViewModel(), onBack = { nav.popBackStack() })
+                com.aiyu.pull.ui.settings.SettingsPageScreen(back.toRoute<SettingsPageRoute>().page, hiltViewModel(), onBack = { nav.popBackStack() }, onPage = { nav.navigate(SettingsPageRoute(it)) })
             }
         }
     }

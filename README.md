@@ -18,7 +18,7 @@ It also downloads torrents and video-site links, and has its own browser.
 <p align="center"><img src="development/brand/logo/splash-preview.gif" width="240" alt="Pull splash animation: the comet's head shoots in, then its three trails stretch out behind it"></p>
 <p align="center"><sub>The splash animation, recorded on an API 37 emulator. The comet is the logo: speed, with trails.</sub></p>
 
-> Pull is under development. There is no release yet, and no benchmark numbers, so this README makes no speed claim
+> Pull is in alpha. There are no benchmark numbers yet, so this README makes no speed claim
 > against other download managers. The method for measuring one is in [`08-benchmarking.md`](development/docs/08-benchmarking.md).
 
 ## What it does
@@ -90,6 +90,27 @@ Design docs: [overview](development/docs/README.md) ·
 | Video | yt-dlp, FFmpeg and aria2c through youtubedl-android |
 
 SDK: `minSdk 26`, `targetSdk 36`, `compileSdk 37`. Versions are in [`gradle/libs.versions.toml`](gradle/libs.versions.toml).
+
+## Install
+
+Download the APK for your phone from [Releases](https://github.com/aiyu-ayaan/Pull/releases). Each release has one APK
+per CPU type, so you download only the native code your phone runs:
+
+| APK | For |
+| --- | --- |
+| `Pull-<version>-arm64-v8a.apk` | Almost every phone made since 2017 |
+| `Pull-<version>-armeabi-v7a.apk` | Older 32-bit phones |
+| `Pull-<version>-x86_64.apk`, `Pull-<version>-x86.apk` | Emulators and Chromebooks |
+
+After that, Pull updates itself. **Settings → Updates** checks GitHub, downloads the APK for your CPU and hands it to
+Android's installer. You can pick the Stable, Beta or Alpha channel there. The check reads only the public release
+list and sends no data about you.
+
+### Releases
+
+A commit on `master` whose subject starts with `!alpha`, `!beta`, `!stable`, `!fix`, `!feat` or `!major` opens a
+release PR. The PR bumps `VERSION` and writes `CHANGELOG.md`. Merging it builds the signed APKs and publishes the
+GitHub Release. The rules are in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
 ## Build and run
 

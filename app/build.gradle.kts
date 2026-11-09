@@ -7,7 +7,37 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+import java.util.Properties
+
+// Release signing: env vars (CI) win over gitignored keystore.properties (local); neither = unsigned release.
+val keystoreProps = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+
+fun signingValue(env: String, property: String): String? =
+    System.getenv(env)?.takeIf { it.isNotBlank() } ?: keystoreProps.getProperty(property)?.takeIf { it.isNotBlank() }
+
+val keystoreFile = signingValue("ANDROID_KEYSTORE_FILE", "storeFile")?.let(rootProject::file)
+
+// Version name lives in the root VERSION file, bumped by the release PR.
 val appVersionName = rootProject.file("VERSION").readText().trim()
+
+/**
+ * Packs X.Y.Z[-alpha|beta.N] into a code that rises with every release: 1.4.2-beta.3 = 10402103, 1.4.2 = 10402200.
+ * [build] (PULL_BUILD, set by a `!patch` rebuild) fills a stable release's free last two digits.
+ */
+fun versionCodeOf(name: String, build: Int = System.getenv("PULL_BUILD")?.toIntOrNull() ?: 0): Int {
+    val match = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta)\.(\d+))?$""").matchEntire(name)
+        ?: error("VERSION '$name' is not X.Y.Z or X.Y.Z-alpha|beta.N")
+    val (major, minor, patch, label, number) = match.destructured
+    require(minor.toInt() < 100 && patch.toInt() < 100 && (number.toIntOrNull() ?: 0) < 100) {
+        "VERSION '$name' overflows a version code slot"
+    }
+    require(build in 0..99) { "PULL_BUILD $build overflows a version code slot" }
+    val stage = when (label) { "alpha" -> 0; "beta" -> 1; else -> 2 }
+    val tail = if (label.isEmpty()) build else number.toInt()
+    return major.toInt() * 10_000_000 + minor.toInt() * 100_000 + patch.toInt() * 1_000 + stage * 100 + tail
+}
 
 android {
     namespace = "com.aiyu.pull"
@@ -17,14 +47,42 @@ android {
         applicationId = "com.aiyu.pull"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = versionCodeOf(appVersionName)
         versionName = appVersionName
+    }
+
+    // libtorrent + Python + FFmpeg natives are most of the APK, once per ABI. One APK per ABI ships each phone
+    // only its own; the updater picks the asset matching Build.SUPPORTED_ABIS (Releases.apkFor).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = false
+        }
+    }
+
+    // Pull is English-only: drop the translations every library ships.
+    androidResources {
+        localeFilters += listOf("en")
+    }
+
+    signingConfigs {
+        if (keystoreFile?.exists() == true) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = signingValue("ANDROID_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("ANDROID_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("ANDROID_KEY_PASSWORD", "keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.findByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
@@ -87,6 +145,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.graphics.shapes)
 
     implementation(libs.room.runtime)

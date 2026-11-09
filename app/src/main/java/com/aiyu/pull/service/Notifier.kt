@@ -37,7 +37,25 @@ class Notifier @Inject constructor(@ApplicationContext private val context: Cont
         manager.createNotificationChannel(
             NotificationChannel(CH_DONE, context.getString(R.string.channel_done), NotificationManager.IMPORTANCE_DEFAULT),
         )
+        manager.createNotificationChannel(
+            NotificationChannel(CH_UPDATES, context.getString(R.string.channel_updates), NotificationManager.IMPORTANCE_LOW),
+        )
     }
+
+    /** A newer Pull release exists. Gated by the auto-update switch, not a notification category. */
+    fun updateAvailable(releaseName: String, installedName: String) = post(
+        UPDATE_ID.toLong(),
+        NotificationCompat.Builder(context, CH_UPDATES)
+            .setSmallIcon(R.drawable.ic_stat_pull)
+            .setContentTitle(context.getString(R.string.notif_update_title, releaseName))
+            .setContentText(context.getString(R.string.notif_update_text, installedName))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(openApp(null))
+            .build(),
+    )
+
+    fun cancelUpdateAvailable() = nm.cancel(UPDATE_ID)
 
     /**
      * The service's single ongoing notification: all active downloads summed. A custom view keeps Pull's wavy
@@ -61,6 +79,7 @@ class Notifier @Inject constructor(@ApplicationContext private val context: Cont
         }
         return NotificationCompat.Builder(context, CH_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_pull)
+            .setColor(ContextCompat.getColor(context, R.color.brand))
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             .setCustomContentView(views(R.layout.notif_progress))
             .setCustomBigContentView(views(R.layout.notif_progress_big))
@@ -120,6 +139,8 @@ class Notifier @Inject constructor(@ApplicationContext private val context: Cont
     companion object {
         const val CH_PROGRESS = "progress"
         const val CH_DONE = "done"
+        const val CH_UPDATES = "updates"
         const val ONGOING_ID = Int.MAX_VALUE
+        const val UPDATE_ID = Int.MAX_VALUE - 1
     }
 }

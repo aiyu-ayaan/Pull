@@ -265,7 +265,7 @@
     <string name="settings_video">Video</string>
     <string name="settings_video_summary">Quality, format, subtitles, yt-dlp</string>
     <string name="settings_appearance_summary">Theme, dynamic color</string>
-    <string name="settings_about_summary">Version, license</string>
+    <string name="settings_about_summary">Version, developer, licenses</string>
     <string name="settings_license">License</string>
     <string name="settings_license_summary">GNU General Public License v3.0</string>
     <string name="settings_section_speed">Speed</string>
@@ -355,4 +355,57 @@
     <string name="dup_show">Show existing</string>
     <string name="dup_status_running">downloading</string>
     <string name="share_label">Download with Pull</string>
+
+    <!-- Self-update -->
+    <string name="channel_updates">App updates</string>
+    <string name="notif_update_title">Pull %1$s is available</string>
+    <string name="notif_update_text">You are on %1$s. Tap to see what changed.</string>
+    <string name="update_not_now">Not now</string>
+    <string name="settings_updates">Updates</string>
+    <string name="settings_updates_summary">Check GitHub for new releases</string>
+    <string name="update_checking">Checking GitHub for a newer release…</string>
+    <string name="update_up_to_date">You\'re up to date.</string>
+    <string name="update_last_checked">Last checked %1$s.</string>
+    <string name="update_not_checked">Not checked yet.</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_automatic">Automatic checks</string>
+    <string name="update_check_automatically">Check automatically</string>
+    <string name="update_automatic_desc">Looks for a newer release on GitHub when you open Pull and once a day on Wi-Fi. Only the public release list is read; nothing about you or your usage is sent.</string>
+    <string name="update_channel">Release channel</string>
+    <string name="update_youre_on">You\'re on %1$s</string>
+    <string name="update_download">Download</string>
+    <string name="update_download_size"> · %1$d MB</string>
+    <string name="update_downloading">Downloading… %1$d%%</string>
+    <string name="update_install">Install</string>
+    <string name="update_install_permission">Android needs your permission before Pull can install an update. You\'ll still confirm on the system screen.</string>
+    <string name="update_allow_installs">Allow installs</string>
+    <string name="update_channel_stable">Stable</string>
+    <string name="update_channel_beta">Beta</string>
+    <string name="update_channel_alpha">Alpha</string>
+    <string name="update_channel_stable_desc">Finished releases only.</string>
+    <string name="update_channel_beta_desc">Release candidates, plus every stable release.</string>
+    <string name="update_channel_alpha_desc">Everything, the moment it is built.</string>
+    <string name="update_err_check">The update check failed</string>
+    <string name="update_err_github">GitHub answered %1$d</string>
+    <string name="update_err_download">The download failed</string>
+    <string name="update_err_download_code">The download failed (%1$d)</string>
+    <string name="update_err_checksum">The download did not match the checksum GitHub published for it</string>
+    <string name="update_err_start">Could not start the install</string>
+    <string name="update_err_screen">Android would not show the install screen</string>
+    <string name="update_err_signature">Android refused the update: this APK is signed with a different key from the installed build. Uninstall this copy first; uninstalling takes its data with it.</string>
+    <string name="update_err_install">The install failed</string>
+
+    <!-- About -->
+    <string name="about_app">App</string>
+    <string name="about_version">Version %1$s (%2$d) · %3$s</string>
+    <string name="about_privacy">Privacy</string>
+    <string name="about_privacy_desc">No telemetry. Downloads and history stay on this device.</string>
+    <string name="about_developer">Developer</string>
+    <string name="about_built">Built Pull.</string>
+    <string name="about_portfolio">Portfolio</string>
+    <string name="about_source">Source code</string>
+    <string name="about_open_source">Open source</string>
+    <string name="about_acknowledgements">Acknowledgements</string>
+    <string name="about_acknowledgements_desc">Libraries Pull is built on</string>
+    <string name="about_acknowledgements_subtitle">Open-source libraries behind Pull</string>
 </resources>

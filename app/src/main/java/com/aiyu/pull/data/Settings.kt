@@ -20,6 +20,7 @@ import com.aiyu.pull.video.AudioFormat
 import com.aiyu.pull.video.Container
 import com.aiyu.pull.video.VideoChoice
 import com.aiyu.pull.video.VideoCodec
+import com.aiyu.pull.update.UpdateChannel
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
@@ -45,6 +46,12 @@ data class Settings(
     val torrentConnections: Int = 200,
     /** Defaults for new video downloads; the sheet can change them per download. */
     val video: VideoChoice = VideoChoice(),
+    /** Self-update from GitHub releases: launch + daily check. */
+    val updatesEnabled: Boolean = true,
+    /** Null = the channel this build came from (UpdateChannel.forVersion). */
+    val updateChannel: UpdateChannel? = null,
+    val updateLastChecked: Long = 0,
+    val updateSnoozedUntil: Long = 0,
 )
 
 /** BitTorrent protocol encryption: allow both, require it, or never use it. */
@@ -88,6 +95,10 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val videoThumbnail = booleanPreferencesKey("video_thumbnail")
         val videoMetadata = booleanPreferencesKey("video_metadata")
         val sponsorBlock = booleanPreferencesKey("sponsor_block")
+        val updatesEnabled = booleanPreferencesKey("updates_enabled")
+        val updateChannel = stringPreferencesKey("update_channel")
+        val updateLastChecked = longPreferencesKey("update_last_checked")
+        val updateSnoozedUntil = longPreferencesKey("update_snoozed_until")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -120,6 +131,10 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
                 metadata = p[Keys.videoMetadata] ?: true,
                 sponsorBlock = p[Keys.sponsorBlock] ?: false,
             ),
+            updatesEnabled = p[Keys.updatesEnabled] ?: true,
+            updateChannel = p[Keys.updateChannel]?.let { runCatching { UpdateChannel.valueOf(it) }.getOrNull() },
+            updateLastChecked = p[Keys.updateLastChecked] ?: 0,
+            updateSnoozedUntil = p[Keys.updateSnoozedUntil] ?: 0,
         )
     }
 
@@ -158,6 +173,10 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setVideoThumbnail(on: Boolean) = set(Keys.videoThumbnail, on)
     suspend fun setVideoMetadata(on: Boolean) = set(Keys.videoMetadata, on)
     suspend fun setSponsorBlock(on: Boolean) = set(Keys.sponsorBlock, on)
+    suspend fun setUpdatesEnabled(on: Boolean) = set(Keys.updatesEnabled, on)
+    suspend fun setUpdateChannel(c: UpdateChannel) = set(Keys.updateChannel, c.name)
+    suspend fun setUpdateLastChecked(at: Long) = set(Keys.updateLastChecked, at)
+    suspend fun setUpdateSnoozedUntil(at: Long) = set(Keys.updateSnoozedUntil, at)
     suspend fun setTorrentConnections(n: Int) = set(Keys.torrentConnections, n.coerceIn(20, 500))
 
     companion object {

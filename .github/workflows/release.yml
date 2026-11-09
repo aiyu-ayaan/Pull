@@ -1,0 +1,514 @@
+# Automated release, driven by a marker at the START of a commit subject on
+# master:
+#
+#   !major   1.4.2         -> 2.0.0           stable
+#   !feat    1.4.2         -> 1.5.0           stable
+#   !fix     1.4.2         -> 1.4.3           stable
+#   !alpha   0.0.1         -> 0.0.2-alpha.1   pre-release
+#            0.0.2-alpha.1 -> 0.0.2-alpha.2
+#   !beta    0.0.2-alpha.3 -> 0.0.2-beta.1    promote, same base version
+#   !stable  0.0.2-beta.2  -> 0.0.2           promote to stable, no bump
+#   !patch   0.0.2         -> 0.0.2           no new version: rebuild in place
+#
+# A push with no marker is not a release and this workflow does nothing. The
+# rules live in scripts/release-version.mjs and the notes in
+# scripts/release-notes.mjs; both have a --check self-test.
+#
+# TWO STEPS, NOT ONE
+#
+#   1. A marker on master opens (or updates) a release PR. It bumps VERSION and
+#      writes the CHANGELOG entry, and nothing is built. The diff is the last
+#      chance to look at what is about to ship and at the notes describing it.
+#
+#   2. Merging that PR is what releases. One signed APK per ABI is built, and the
+#      tag and the GitHub Release are created last, once they exist.
+#
+# `!patch` skips step 1: it rebuilds the APKs of the version master already
+# carries and re-attaches them to the Release that exists. There is no rollback
+# for a patch - the release it replaces is the one a rollback would delete.
+#
+# If a release fails, `rollback` removes the tag and Release if either got as
+# far as existing, and reverts the version bump off master (with `[skip ci]`,
+# or the revert would look like a release PR landing). Otherwise the next
+# release would compute from a version that was never published.
+
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'pr = open the release PR; release = build and publish the version master already carries; patch = rebuild the artifacts of that version in place'
+        required: true
+        default: pr
+        type: choice
+        options: [pr, release, patch]
+      marker:
+        description: 'Release type (pr mode only)'
+        required: false
+        default: alpha
+        type: choice
+        options: [alpha, beta, stable, fix, feat, major]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Never two releases at once: the second would compute its version from a
+# VERSION the first has already moved past.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # --- Step 1: the release PR ------------------------------------------------
+
+  version:
+    name: Work out the next version
+    if: github.event_name == 'push' || inputs.mode == 'pr'
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.next.outputs.release }}
+      marker: ${{ steps.next.outputs.marker }}
+      version: ${{ steps.next.outputs.version }}
+      current: ${{ steps.current.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Every subject pushed, not just the head commit: a push of three commits
+      # where the middle one asks for a release is still a release.
+      - name: Collect pushed commit subjects
+        if: github.event_name == 'push'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$BEFORE_SHA" ] && [ "$(echo "$BEFORE_SHA" | tr -d 0)" != "" ] \
+             && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            git log "$BEFORE_SHA..$AFTER_SHA" --format=%s > subjects.txt
+          else
+            git log -1 --format=%s > subjects.txt
+          fi
+          cat subjects.txt
+
+      - name: Use the dispatched marker
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "!${{ inputs.marker }}: manual release" > subjects.txt
+          cat subjects.txt
+
+      - id: current
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Next version
+        id: next
+        run: |
+          node scripts/release-version.mjs \
+            --current "${{ steps.current.outputs.version }}" \
+            --subjects-file subjects.txt | tee -a "$GITHUB_OUTPUT"
+
+      - name: Nothing to release
+        if: steps.next.outputs.release != 'true'
+        run: echo "No !major/!feat/!fix/!alpha/!beta/!stable/!patch marker on this push."
+
+  release-pr:
+    name: Release PR for v${{ needs.version.outputs.version }}
+    needs: version
+    # A `!patch` has no diff to show, so it has no PR either.
+    if: needs.version.outputs.release == 'true' && needs.version.outputs.marker != 'patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump VERSION
+        run: echo "${{ needs.version.outputs.version }}" > VERSION
+
+      # Everything since the last released tag, which is what this version
+      # contains. On the first release there is no tag and the whole history is
+      # the answer.
+      - name: Write the CHANGELOG entry
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PREVIOUS: ${{ needs.version.outputs.current }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${PREVIOUS}" > /dev/null; then
+            git log "v${PREVIOUS}..HEAD" --format=%s > subjects.txt
+          else
+            git log --format=%s > subjects.txt
+          fi
+          node scripts/release-notes.mjs \
+            --version "$VERSION" \
+            --previous "$PREVIOUS" \
+            --repository "$GITHUB_REPOSITORY" \
+            --subjects-file subjects.txt > CHANGELOG.next.md
+          mv CHANGELOG.next.md CHANGELOG.md
+          rm -f subjects.txt
+          cat CHANGELOG.md
+
+      - name: Open or update the release PR
+        id: pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          commit-message: 'chore(release): v${{ needs.version.outputs.version }}'
+          title: 'chore(release): v${{ needs.version.outputs.version }}'
+          body: |
+            Automated release PR — a `!${{ needs.version.outputs.marker }}` marker on master.
+
+            | | |
+            | --- | --- |
+            | From | `${{ needs.version.outputs.current }}` |
+            | To | `${{ needs.version.outputs.version }}` |
+            | Marker | `!${{ needs.version.outputs.marker }}` |
+            | Builds | `android (one APK per ABI: arm64-v8a, armeabi-v7a, x86_64, x86)` |
+
+            Changed here: `VERSION`, `CHANGELOG.md`.
+            The CHANGELOG diff is the release note — edit it in this branch if it
+            reads badly, that is what this PR is for.
+
+            **Merging this PR is what releases.** It builds the signed per-ABI APKs,
+            then creates the tag and the GitHub Release. Closing it
+            without merging releases nothing and costs nothing.
+          branch: chore/release-v${{ needs.version.outputs.version }}
+          base: master
+          labels: release
+          delete-branch: true
+
+      - name: Ensure the PR exists
+        if: steps.pr.outputs.pull-request-number == ''
+        run: |
+          echo "No release PR was created or updated."
+          echo "Branch protection, or a v${{ needs.version.outputs.version }} that already exists."
+          exit 1
+
+      - name: Summary
+        run: |
+          echo "### Release PR for v${{ needs.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.pr.outputs.pull-request-url }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # --- Step 2: merging that PR is the release --------------------------------
+
+  merged:
+    name: Detect a merged release PR
+    if: github.event_name == 'push' || inputs.mode != 'pr'
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.detect.outputs.release }}
+      version: ${{ steps.detect.outputs.version }}
+      prerelease: ${{ steps.detect.outputs.prerelease }}
+      patch: ${{ steps.detect.outputs.patch }}
+      build: ${{ steps.detect.outputs.build }}
+    steps:
+      # The whole history: HEAD^ is what the version is compared against.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Is this the release commit
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          MODE: ${{ inputs.mode }}
+          SUBJECT: ${{ github.event.head_commit.message }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          subject="$(printf '%s' "$SUBJECT" | head -1)"
+          current="$(tr -d '[:space:]' < VERSION)"
+          release=false
+          patch=false
+
+          if [ "$EVENT" = workflow_dispatch ]; then
+            # Asked for by hand: release whatever master carries. This is the
+            # way back after a rollback, and how the very first version ships.
+            release=true
+            [ "$MODE" = patch ] && patch=true
+            echo "Dispatched ($MODE): v${current} as master stands."
+          else
+            # A squash or rebase merge puts the PR title on the commit.
+            case "$subject" in
+              'chore(release): v'*) release=true ;;
+            esac
+
+            # A merge commit's subject says nothing, so the VERSION file is the
+            # answer instead: only a release PR moves it.
+            previous="$(git show HEAD^:VERSION 2>/dev/null | tr -d '[:space:]' || true)"
+            echo "subject: ${subject}"
+            echo "version: ${previous:-<unknown>} -> ${current}"
+            if [ -n "$previous" ] && [ "$previous" != "$current" ]; then
+              release=true
+            fi
+
+            # No new version, so it may still be a `!patch`.
+            if [ "$release" != true ]; then
+              if [ -n "$BEFORE_SHA" ] && [ "$(echo "$BEFORE_SHA" | tr -d 0)" != "" ] \
+                 && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+                git log "$BEFORE_SHA..$GITHUB_SHA" --format=%s > subjects.txt
+              else
+                git log -1 --format=%s > subjects.txt
+              fi
+              plan="$(node scripts/release-version.mjs --current "$current" --subjects-file subjects.txt)"
+              if [ "$(printf '%s\n' "$plan" | sed -n 's/^marker=//p')" = patch ]; then
+                release=true
+                patch=true
+                echo "!patch: rebuilding v${current} in place."
+              fi
+            fi
+          fi
+
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          if [ "$release" != true ]; then
+            echo "Not a release commit; nothing is built."
+            exit 0
+          fi
+
+          # A patch replaces a release that exists. Without the tag there is
+          # nothing to replace.
+          if [ "$patch" = true ] && ! git rev-parse -q --verify "refs/tags/v${current}" > /dev/null; then
+            echo "::error::v${current} has never been released; a patch has nothing to replace."
+            exit 1
+          fi
+
+          case "$current" in
+            *-alpha.*|*-beta.*) prerelease=true ;;
+            *)                  prerelease=false ;;
+          esac
+
+          # Play refuses a version code it has seen, so each patch of a version
+          # gets the next build number: commits since its tag (0 for the release).
+          build=0
+          if [ "$patch" = true ]; then
+            build="$(git rev-list --count "v${current}..HEAD")"
+          fi
+
+          {
+            echo "version=$current"
+            echo "prerelease=$prerelease"
+            echo "patch=$patch"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing v$current (prerelease: $prerelease, patch: $patch)."
+
+  android:
+    name: Android APKs
+    needs: merged
+    if: needs.merged.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    # Hoisted so a step can ask whether it was supplied: the `secrets` context
+    # is not available in a step-level `if`, but `env` is.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Unsigned when the secret is absent, which keeps a fork's release
+      # runnable without handing it a signing key.
+      - name: Keystore
+        id: keystore
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          sh "$GITHUB_WORKSPACE/.github/scripts/decode-keystore.sh" "$RUNNER_TEMP/release.jks"
+
+          # A keystore that cannot be opened with the password and alias it was
+          # given is worth finding out about here rather than as an unsigned APK.
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+                 -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null 2>&1; then
+            echo "::error::The keystore decoded, but ANDROID_KEYSTORE_PASSWORD or ANDROID_KEY_ALIAS does not open it."
+            exit 1
+          fi
+
+          echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+
+      - name: Build APKs
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ steps.keystore.outputs.path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PULL_BUILD: ${{ needs.merged.outputs.build }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      # app-arm64-v8a-release.apk says nothing about which release it is once it
+      # has been downloaded. Name it after the version and the ABI.
+      # The in-app updater matches these names (Releases.apkFor): keep them in step.
+      - name: Name the APKs after the version
+        env:
+          VERSION: ${{ needs.merged.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/android"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            src="app/build/outputs/apk/release/app-${abi}-release.apk"
+            test -f "$src" || { echo "::error::$abi APK missing (unsigned? check the keystore secrets)"; exit 1; }
+            cp "$src" "$RUNNER_TEMP/android/Pull-${VERSION}-${abi}.apk"
+          done
+          ls -la "$RUNNER_TEMP/android"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ runner.temp }}/android/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish v${{ needs.merged.outputs.version }}
+    needs: [merged, android]
+    if: >-
+      !cancelled() && needs.merged.outputs.release == 'true'
+      && !contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: android-*
+          merge-multiple: true
+          path: artifacts/android
+
+      # The notes were written and reviewed in the release PR. Reading them back
+      # out of CHANGELOG.md means the Release says exactly what the diff said.
+      - name: Release notes
+        id: notes
+        env:
+          VERSION: ${{ needs.merged.outputs.version }}
+        run: |
+          {
+            echo 'body<<CHANGELOG_EOF'
+            node scripts/release-notes.mjs --section --version "$VERSION"
+            echo CHANGELOG_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      # On a `!patch` the tag and the Release already exist, and this updates
+      # them: an asset whose name matches one already attached replaces it.
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.merged.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: v${{ needs.merged.outputs.version }}
+          prerelease: ${{ needs.merged.outputs.prerelease == 'true' }}
+          body: |
+            ${{ steps.notes.outputs.body }}
+
+            ## Install
+
+            Pick the APK for your phone's CPU. Most phones made since 2017 are `arm64-v8a`.
+
+            - `Pull-${{ needs.merged.outputs.version }}-arm64-v8a.apk` — almost every current phone
+            - `Pull-${{ needs.merged.outputs.version }}-armeabi-v7a.apk` — older 32-bit phones
+            - `Pull-${{ needs.merged.outputs.version }}-x86_64.apk` / `-x86.apk` — emulators and Chromebooks
+
+            Once installed, Pull updates itself: **Settings → Updates** picks the right APK for the device.
+          files: artifacts/android/*
+
+  # --- If any of that failed, leave nothing half-published -------------------
+
+  rollback:
+    name: Undo a failed release
+    needs: [merged, android, publish]
+    if: always() && needs.merged.outputs.release == 'true' && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      # A patch replaces a release that already exists; undoing it would delete
+      # that good release. Running the patch again is the fix.
+      - name: A failed patch is not rolled back
+        if: needs.merged.outputs.patch == 'true'
+        run: |
+          {
+            echo "### Patch of v${{ needs.merged.outputs.version }} failed"
+            echo
+            echo "Nothing was undone. Fix what failed and push \`!patch\` again. Repeating it is safe."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # master, not the release commit: the last step pushes to it. The
+      # RELEASE_TOKEN when there is one, because GITHUB_TOKEN cannot push to a
+      # protected branch.
+      - uses: actions/checkout@v4
+        if: needs.merged.outputs.patch != 'true'
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Delete the tag and the Release
+        if: needs.merged.outputs.patch != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.merged.outputs.version }}
+        run: |
+          if gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release delete "v${VERSION}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            echo "deleted release v${VERSION} and its tag"
+          else
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/v${VERSION}" 2>/dev/null \
+              && echo "deleted tag v${VERSION}" \
+              || echo "no tag v${VERSION} to delete"
+          fi
+
+      # `[skip ci]` is not decoration. Without it this push comes straight back
+      # through `merged`, which reads a changed VERSION as a release PR landing.
+      - name: Take the version bump off master
+        if: needs.merged.outputs.patch != 'true'
+        env:
+          VERSION: ${{ needs.merged.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          previous="$(git show "${SHA}^:VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+          if [ -z "$previous" ] || [ "$previous" = "$VERSION" ]; then
+            echo "${SHA} did not bump the version; there is nothing to take off master."
+            exit 0
+          fi
+          # Anything pushed since is not this job's to move.
+          if [ "$(git rev-parse HEAD)" != "$SHA" ]; then
+            echo "::warning::master has moved past ${SHA}; the v${VERSION} bump is still on it and has to be reverted by hand."
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          # `-m 1` for a merge commit; a squash or rebase merge takes no parent number.
+          if [ "$(git rev-list --parents -n 1 "$SHA" | wc -w)" -gt 2 ]; then
+            git revert --no-commit -m 1 "$SHA"
+          else
+            git revert --no-commit "$SHA"
+          fi
+          git commit -q \
+            -m "revert(release): back out v${VERSION} [skip ci]" \
+            -m "The release failed and was rolled back, so master goes back to v${previous}."
+
+          if git push origin HEAD:master; then
+            echo "### Release v${VERSION} rolled back; master is back on v${previous}." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Could not push the revert - branch protection, most likely. Revert ${SHA} by hand."
+          fi
