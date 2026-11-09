@@ -143,13 +143,11 @@ private class TorrentTransfer(
         count = ti.numFiles()
         Bencode.webSeeds(file.readBytes()).forEach { url -> if (url !in h.urlSeeds()) h.addUrlSeed(url) }
         h.resume()
-        var ticks = 0
         try {
             while (true) {
                 currentCoroutineContext().ensureActive()
                 val st = h.status()
                 publishLive(h, ti, st, e.url)
-                if (++ticks % 10 == 1) android.util.Log.d("PullTorrent", "state=${st.state()} err=${st.errorCode()} peers=${st.numPeers()} seeds=${h.urlSeeds()} done=${st.totalWantedDone()}/${st.totalWanted()} save=${h.savePath()}")
                 if (st.totalWanted() > 0 && st.totalWantedDone() >= st.totalWanted() &&
                     st.state() != TorrentStatus.State.CHECKING_FILES && st.state() != TorrentStatus.State.CHECKING_RESUME_DATA
                 ) return@withContext st.totalWanted()
