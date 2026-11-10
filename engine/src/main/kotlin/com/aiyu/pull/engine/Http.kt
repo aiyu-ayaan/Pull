@@ -70,6 +70,20 @@ internal fun fileNameFrom(headers: Headers): String? {
 internal fun String.sanitizeFileName(): String? =
     substringAfterLast('/').substringAfterLast('\\').replace(Regex("""[\u0000-\u001f<>:"|?*]"""), "_").trim().ifBlank { null }
 
+/**
+ * A 200 does not prove the server ignores ranges: one single-byte request at a real offset does. On a valid 206 the
+ * result accepts ranges and has the size, even when the 200 came without a length.
+ */
+internal fun RemoteInfo.verifyRanges(headers: Map<String, String>, execute: (Request) -> Response): RemoteInfo {
+    val at = if (totalBytes > 1) totalBytes / 2 else 1L
+    val range = runCatching {
+        execute(rangeRequest(finalUrl, headers, at, at)).use { r -> parseContentRange(r.header("Content-Range")).takeIf { r.code == 206 } }
+    }.getOrNull() ?: return this
+    val total = range.third
+    val valid = range.first == at && total > at && (totalBytes < 0 || total == totalBytes)
+    return if (valid) copy(acceptRanges = true, totalBytes = total) else this
+}
+
 /** Weak and strong ETags of the same entity compare equal for our purpose (same bytes on the same server). */
 internal fun sameEtag(a: String?, b: String?): Boolean =
     a == null || b == null || a.removePrefix("W/") == b.removePrefix("W/")
@@ -82,7 +96,8 @@ suspend fun probe(client: OkHttpClient, url: String, headers: Map<String, String
         val call = client.newCall(rangeRequest(url, headers, 0, 0))
         call.execute().use { r ->
             when {
-                r.code == 200 || r.code == 206 -> r.remoteInfo()
+                r.code == 206 -> r.remoteInfo()
+                r.code == 200 -> r.remoteInfo().verifyRanges(headers) { client.newCall(it).execute() }
                 r.code.isExpiredLinkCode() -> throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired (HTTP ${r.code})", r.code)
                 else -> throw DownloadException(ErrorKind.HTTP, "HTTP ${r.code}", r.code)
             }

@@ -11,6 +11,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -42,6 +43,10 @@ class DownloadTaskTest {
     @Volatile private var failNext503 = 0
     @Volatile private var throttle = false
     @Volatile private var chunked = false
+    /** Like many file hosts: `bytes=0-` gets a plain 200, real offsets get 206. */
+    @Volatile private var plain200ForWholeFile = false
+    /** Cut this many responses off halfway, like a network switch. */
+    @Volatile private var dropNext = 0
 
     @Before fun setUp() {
         file = File.createTempFile("pull", ".bin").apply { deleteOnExit() }
@@ -70,7 +75,8 @@ class DownloadTaskTest {
         val b = MockResponse.Builder().addHeader("ETag", etag)
         if (throttle) b.throttleBody(16 * 1024, 20, TimeUnit.MILLISECONDS)
         val m = range?.let { Regex("""bytes=(\d+)-(\d*)""").find(it) }
-        if (!supportRanges || m == null) {
+        if (dropNext > 0) { dropNext--; b.onResponseBody(SocketEffect.CloseSocket()) }
+        if (!supportRanges || m == null || (plain200ForWholeFile && range == "bytes=0-")) {
             return if (chunked) b.code(200).chunkedBody(Buffer().write(data), 64 * 1024).build()
             else b.code(200).body(Buffer().write(data)).build()
         }
@@ -86,8 +92,8 @@ class DownloadTaskTest {
         FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.CREATE)
     }
 
-    private fun task(path: String, resume: ResumeData? = null, connections: Int = 8) = DownloadTask(
-        client, DownloadRequest(server.url(path).toString(), maxConnections = connections, minSplitBytes = 256 * 1024, resume = resume),
+    private fun task(path: String, resume: ResumeData? = null, connections: Int = 8, minSplit: Long = 256 * 1024) = DownloadTask(
+        client, DownloadRequest(server.url(path).toString(), maxConnections = connections, minSplitBytes = minSplit, resume = resume),
         opener(), retryBaseMillis = 10,
     )
 
@@ -109,6 +115,40 @@ class DownloadTaskTest {
         val info = task("/f").run()
         assertTrue(!info.acceptRanges)
         assertFileMatches()
+    }
+
+    @Test fun plain200ForWholeFileStillSplits() = runBlocking {
+        plain200ForWholeFile = true
+        chunked = true // no Content-Length either: the size comes from the range check
+        val info = task("/f").run()
+        assertTrue(info.acceptRanges)
+        assertEquals(data.size.toLong(), info.totalBytes)
+        assertFileMatches()
+        assertTrue("expected parallel ranges, got $ranges", ranges.size >= 8)
+    }
+
+    @Test fun droppedConnectionContinuesInsteadOfRestarting() = runBlocking {
+        plain200ForWholeFile = true
+        dropNext = 1
+        // Too small to be range-checked up front, so it starts as "not resumable" on one connection.
+        val info = withContext(Dispatchers.Default) { task("/f", minSplit = 64L shl 20).run() }
+        assertTrue(info.acceptRanges)
+        assertFileMatches()
+        assertEquals("bytes=0-", ranges.first())
+        assertTrue("must continue from the break, not from 0: $ranges", ranges.drop(1).none { it == "bytes=0-" })
+    }
+
+    @Test fun droppedConnectionFailsWhenServerCannotResume() = runBlocking {
+        supportRanges = false
+        dropNext = 1
+        val t = task("/f")
+        try {
+            withContext(Dispatchers.Default) { t.run() }
+            fail("expected a failure, not a silent restart")
+        } catch (e: DownloadException) {
+            assertEquals(ErrorKind.HTTP, e.kind)
+        }
+        assertTrue("progress must survive the failure", t.snapshot()!!.segments.single().current > 0)
     }
 
     @Test fun unknownLengthDownloadsToEof() = runBlocking {

@@ -10,7 +10,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -66,11 +65,15 @@ class DownloadTask(
     @Volatile private var cancelled = false
     @Volatile private var info: RemoteInfo? = request.resume?.info
     private lateinit var channel: FileChannel
+    private lateinit var workerScope: CoroutineScope
     private var totalSpeed = 0.0
     private var lastDownloaded = -1L
 
     init {
-        request.resume?.takeIf { it.info.acceptRanges && it.info.totalBytes > 0 }?.segments?.filter { !it.done }?.forEach { s ->
+        // A download first seen as non-resumable keeps its bytes too: the next request asks for the offset and the
+        // server's answer decides (206 continues, 200 fails; never a silent restart from 0).
+        val ranged = request.resume?.info?.let { it.acceptRanges && it.totalBytes > 0 } == true
+        request.resume?.segments?.filter { !it.done && (ranged || it.current > it.start) }?.forEach { s ->
             val seg = Segment(s.start, s.end, s.current)
             segments += seg
             queue += seg
@@ -102,7 +105,8 @@ class DownloadTask(
         val sampler = launch { while (true) { delay(250); sample() } }
         try {
             val resume = request.resume
-            if (resume != null && resume.info.acceptRanges && resume.info.totalBytes > 0) resumeFrom(resume) else fresh()
+            val ranged = resume != null && resume.info.acceptRanges && resume.info.totalBytes > 0
+            if (resume != null && (ranged || segments.isNotEmpty())) resumeFrom(resume) else fresh()
             val i = info!!
             if (i.totalBytes >= 0 && segments.any { it.remaining > 0 }) {
                 throw DownloadException(ErrorKind.NETWORK, "Download stopped before the end")
@@ -116,13 +120,13 @@ class DownloadTask(
         }
     }
 
-    private suspend fun CoroutineScope.resumeFrom(resume: ResumeData) {
+    private suspend fun resumeFrom(resume: ResumeData) {
         channel = openChannel(resume.info)
         sample()
         startWorkers(first = null)
     }
 
-    private suspend fun CoroutineScope.fresh() {
+    private suspend fun fresh() {
         val first = retrying {
             execute(rangeRequest(request.url, request.headers, 0, null)).also {
                 if (it.code == 429 || it.code >= 500) { it.close(); throw IOException("HTTP ${it.code}") }
@@ -135,14 +139,10 @@ class DownloadTask(
                 else -> throw DownloadException(ErrorKind.HTTP, "HTTP ${first.code}", first.code)
             }
             var i = first.remoteInfo()
-            // 200 with a length: ranges unknown. One extra ranged request tells; the first stream keeps going meanwhile.
-            if (first.code == 200 && i.totalBytes > 2 * request.minSplitBytes) {
-                val mid = i.totalBytes / 2
-                val check = runCatching { execute(rangeRequest(i.finalUrl, request.headers, mid, null)) }.getOrNull()
-                check?.use {
-                    val range = parseContentRange(it.header("Content-Range"))
-                    if (it.code == 206 && range?.first == mid && range.third == i.totalBytes) i = i.copy(acceptRanges = true)
-                }
+            // 200: ranges unknown (many servers answer `bytes=0-` with a plain 200). One extra ranged request tells;
+            // the first stream keeps going meanwhile.
+            if (first.code == 200 && (i.totalBytes < 0 || i.totalBytes > 2 * request.minSplitBytes)) {
+                i = i.verifyRanges(request.headers, ::execute)
             }
             channel = openChannel(i)
             val total = i.totalBytes
@@ -169,10 +169,25 @@ class DownloadTask(
         }
     }
 
-    private suspend fun CoroutineScope.startWorkers(first: Pair<Segment, Response>?) {
+    /** Returns when every worker is done, including the ones [upgrade] adds later. */
+    private suspend fun startWorkers(first: Pair<Segment, Response>?): Unit = coroutineScope {
+        workerScope = this
         val i = info!!
         val workers = if (i.acceptRanges && i.totalBytes > 0) request.maxConnections.coerceAtLeast(1) else 1
-        (listOf(launch { worker(first) }) + List(workers - 1) { launch { worker(null) } }).joinAll()
+        launch { worker(first) }
+        repeat(workers - 1) { launch { worker(null) } }
+    }
+
+    /** A server first seen as non-resumable just honoured an offset: keep the bytes and let the other workers in. */
+    private fun upgrade(seg: Segment, total: Long) {
+        synchronized(lock) {
+            val i = info!!
+            val known = if (i.totalBytes >= 0) i.totalBytes else total
+            if (i.acceptRanges || known <= 0) return
+            seg.end.compareAndSet(Long.MAX_VALUE, known - 1)
+            info = i.copy(acceptRanges = true, totalBytes = known)
+            repeat(request.maxConnections - 1) { workerScope.launch { worker(null) } }
+        }
     }
 
     private suspend fun worker(first: Pair<Segment, Response>?) {
@@ -242,7 +257,6 @@ class DownloadTask(
                     attempt++
                     seg.retries++
                     if (attempt > maxRetries) throw DownloadException(ErrorKind.NETWORK, e.message ?: "Network error", cause = e)
-                    if (info?.acceptRanges != true) seg.current.set(seg.start) // no ranges: only a restart from 0 is valid
                     awaitNetwork()
                     delay(backoff(attempt))
                 }
@@ -273,12 +287,18 @@ class DownloadTask(
         }
         if (code != 206) {
             r.close()
-            throw DownloadException(ErrorKind.HTTP, if (code == 200) "Server stopped accepting resume requests" else "HTTP $code", code)
+            val message = when {
+                code != 200 -> "HTTP $code"
+                i.acceptRanges -> "Server stopped accepting resume requests"
+                else -> "Connection lost and this server cannot resume. Refresh the link or restart the download."
+            }
+            throw DownloadException(ErrorKind.HTTP, message, code)
         }
         val range = parseContentRange(r.header("Content-Range"))
         val changed = range == null || range.first != seg.current.get() ||
             (i.totalBytes >= 0 && range.third >= 0 && range.third != i.totalBytes) || !sameEtag(i.etag, r.header("ETag"))
         if (changed) { r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed") }
+        if (!i.acceptRanges) upgrade(seg, range.third)
         return r
     }
 
