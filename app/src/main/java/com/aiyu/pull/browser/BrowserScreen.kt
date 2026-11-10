@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.BottomAppBarDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -260,6 +261,8 @@ fun BrowserScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
+            // Same container as the bottom bar, drawn behind the status bar so both bars read as one chrome.
+            Surface(color = BottomAppBarDefaults.containerColor) {
             Column(Modifier.statusBarsPadding()) {
                 Row(
                     Modifier.padding(horizontal = Dimens.sm, vertical = Dimens.xs),
@@ -348,6 +351,7 @@ fun BrowserScreen(
                         )
                     }
                 }
+            }
             }
         },
         bottomBar = {
@@ -557,7 +561,8 @@ private fun setupTabWebView(
             val currentSettings = getSettings()
             if (!currentSettings.browserAdBlock) return null
             val reqUrl = request.url.toString()
-            if (adBlocker.isBlocked(reqUrl, view.url)) {
+            // Runs on a WebView IO thread: view.url would throw there, tab.url is safe to read.
+            if (adBlocker.isBlocked(reqUrl, tab.url)) {
                 view.post { tab.blockedCount++ }
                 return adBlocker.createBlockedResponse(reqUrl)
             }
