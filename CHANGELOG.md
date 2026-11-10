@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1-alpha.5](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.4...v0.1.1-alpha.5) (2026-11-10)
+
+### Bug fixes
+
+* Split servers that answer 200 to bytes=0-, never restart on a dropped link
+* System bar icons follow the in-app theme
+* Stop reading WebView.url off the main thread
+
+### Other changes
+
+* Release browser crash, resume and engine split fixes
+
 ## [0.1.1-alpha.4](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.3...v0.1.1-alpha.4) (2026-11-09)
 
 ### Features
