@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -185,11 +186,22 @@ private fun LazyListScope.torrents(s: Settings, vm: SettingsViewModel) {
         }
     }
     item {
+        Section(R.string.settings_section_seeding) {
+            SwitchItem(R.string.settings_seed, R.string.settings_seed_hint, s.torrentSeed) { on -> vm.update { setTorrentSeed(on) } }
+            if (s.torrentSeed) ChoiceItem(
+                R.string.settings_seed_ratio,
+                options = listOf(50 to R.string.ratio_half, 100 to R.string.ratio_one, 200 to R.string.ratio_two, 0 to R.string.ratio_unlimited),
+                selected = s.torrentSeedRatio,
+            ) { r -> vm.update { setTorrentSeedRatio(r) } }
+        }
+    }
+    item {
         Section(R.string.settings_section_network) {
             SwitchItem(R.string.settings_dht, R.string.settings_dht_hint, s.torrentDht) { on -> vm.update { setTorrentDht(on) } }
             SwitchItem(R.string.settings_lsd, R.string.settings_lsd_hint, s.torrentLsd) { on -> vm.update { setTorrentLsd(on) } }
             SwitchItem(R.string.settings_utp, R.string.settings_utp_hint, s.torrentUtp) { on -> vm.update { setTorrentUtp(on) } }
             SwitchItem(R.string.settings_port_mapping, R.string.settings_port_mapping_hint, s.torrentPortMapping) { on -> vm.update { setTorrentPortMapping(on) } }
+            TrackersItem(s.torrentDefaultTrackers) { urls -> vm.update { setTorrentDefaultTrackers(urls) } }
         }
     }
     item {
@@ -489,6 +501,41 @@ private fun <T> ChoiceItem(title: Int, options: List<Pair<T, Int>>, selected: T,
         },
         confirmButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.action_cancel)) } },
     )
+}
+
+/** Tracker URLs added to every torrent, one per line. */
+@Composable
+private fun TrackersItem(value: String, onChange: (String) -> Unit) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    val count = value.lines().count { it.isNotBlank() }
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_default_trackers)) },
+        supportingContent = {
+            Text(if (count == 0) stringResource(R.string.settings_default_trackers_hint) else pluralStringResource(R.plurals.trackers_count, count, count))
+        },
+        colors = itemColors(),
+        modifier = Modifier.clickable { open = true },
+    )
+    if (open) {
+        var text by rememberSaveable { mutableStateOf(value) }
+        // Same check as the per-torrent dialog: only lines that look like tracker URLs are kept.
+        val urls = text.lines().map(String::trim).filter { Regex("""^(udp|https?|wss?)://\S+$""").matches(it) }
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(stringResource(R.string.settings_default_trackers)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+                    Text(stringResource(R.string.settings_default_trackers_hint), style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(
+                        text, { text = it }, label = { Text(stringResource(R.string.trackers_hint)) },
+                        minLines = 4, maxLines = 8, modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { open = false; onChange(urls.distinct().joinToString("\n")) }) { Text(stringResource(R.string.action_apply)) } },
+            dismissButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
 }
 
 /** A speed limit in KB/s; 0 means unlimited. */

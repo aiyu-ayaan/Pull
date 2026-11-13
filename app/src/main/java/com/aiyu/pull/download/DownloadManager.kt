@@ -82,6 +82,8 @@ class DownloadManager @Inject constructor(
     private class Running(val transfer: Transfer, val job: Job) {
         /** What a cancel means: a pause, or a restart that re-queues. */
         @Volatile var stopAs = Status.PAUSED
+        /** Completed torrent still uploading: keeps the service alive but not a download slot. */
+        @Volatile var seeding = false
         val history = ArrayDeque<Long>()
         var peak = 0L
         var lastSave = SystemClock.elapsedRealtime()
@@ -304,7 +306,7 @@ class DownloadManager @Inject constructor(
             scheduleLock.withLock {
                 val max = settings.current().maxDownloads
                 for (e in dao.withStatus(Status.QUEUED)) {
-                    if (running.size >= max) break
+                    if (running.values.count { !it.seeding } >= max) break
                     if (!running.containsKey(e.id)) start(e)
                 }
             }
@@ -336,6 +338,8 @@ class DownloadManager @Inject constructor(
 
     private suspend fun CoroutineScope.execute(id: Long, task: Transfer) {
         val flusher = launch { while (true) { delay(1_000); save(id) } }
+        // After COMPLETED is written, a cancel only stops seeding and must not turn the row into PAUSED.
+        var completed = false
         try {
             val size = task.run()
             flusher.cancelAndJoin()
@@ -343,8 +347,11 @@ class DownloadManager @Inject constructor(
             task.publish()
             val e = dao.get(id) ?: return
             dao.finish(id, Status.COMPLETED, null, null, System.currentTimeMillis())
+            completed = true
             notifier.completed(id, e.fileName, size)
+            task.seed { running[id]?.seeding = true; schedule() }
         } catch (c: CancellationException) {
+            if (completed) throw c
             withContext(NonCancellable) {
                 flusher.cancelAndJoin()
                 save(id)
@@ -352,6 +359,7 @@ class DownloadManager @Inject constructor(
             }
             throw c
         } catch (t: Throwable) {
+            if (completed) { Log.w(TAG, "Seeding $id stopped", t); return }
             withContext(NonCancellable) {
                 flusher.cancelAndJoin()
                 save(id)

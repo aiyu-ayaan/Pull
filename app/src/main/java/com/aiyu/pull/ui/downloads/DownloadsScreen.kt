@@ -645,6 +645,10 @@ private fun StatusLine(view: DownloadView) {
         }
         Status.QUEUED -> Text(stringResource(R.string.status_queued_line, sizes), style = style, color = c.onSurfaceVariant)
         Status.PAUSED -> Text(stringResource(R.string.status_paused_line, sizes), style = style, color = c.onSurfaceVariant)
+        Status.COMPLETED if view.seeding -> Text(
+            stringResource(R.string.status_seeding_line, formatBytes(e.totalBytes), formatSpeed(view.live?.torrent?.uploadBytesPerSecond ?: 0)),
+            style = style, color = c.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
         Status.COMPLETED -> Text(formatBytes(e.totalBytes.coerceAtLeast(e.downloadedBytes)), style = style, color = c.onSurfaceVariant)
         Status.FAILED -> Row(verticalAlignment = Alignment.CenterVertically) {
             val expired = e.errorKind == ErrorKind.LINK_EXPIRED.name

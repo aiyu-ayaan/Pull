@@ -44,6 +44,8 @@ class DownloadsViewModel @Inject constructor(
 data class DownloadView(val entity: DownloadEntity, val live: LiveStats?) {
     val id get() = entity.id
     val running get() = entity.status == Status.RUNNING
+    /** A finished torrent still in the session: it is uploading. */
+    val seeding get() = entity.status == Status.COMPLETED && live?.torrent != null
     val downloaded get() = live?.downloadedBytes ?: entity.downloadedBytes
     val total get() = live?.totalBytes?.takeIf { it > 0 } ?: entity.totalBytes
     val speed get() = if (running) live?.bytesPerSecond ?: 0 else 0

@@ -68,6 +68,12 @@ interface Transfer {
     /** File is complete on disk: make it visible to other apps. */
     suspend fun publish() {}
 
+    /**
+     * Torrent: called after the download completed and was published. Seeds while the user wants it, calling
+     * [onStart] first; returns when the ratio limit is reached. Cancelling stops seeding. Default: nothing to seed.
+     */
+    suspend fun seed(onStart: () -> Unit) {}
+
     /** Torrent: change which files download, while running. */
     fun updateFiles(selected: Set<Int>) {}
 

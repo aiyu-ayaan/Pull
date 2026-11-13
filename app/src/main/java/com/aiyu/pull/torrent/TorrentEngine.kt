@@ -52,7 +52,7 @@ data class TorrentMeta(val name: String, val infoHash: String, val totalBytes: L
 
 /**
  * One libtorrent session for the whole app, started on first use. Pull downloads torrents like any other
- * download: it stops when the chosen files are complete (no background seeding yet).
+ * download: it stops when the chosen files are complete, then seeds only if the user turned seeding on.
  */
 @Singleton
 class TorrentEngine @Inject constructor(
@@ -65,6 +65,7 @@ class TorrentEngine @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     @Volatile private var latest = Settings()
+    val settings: Settings get() = latest
 
     init {
         // Settings changes apply to a running session at once; a stopped one picks them up when it starts.
@@ -159,6 +160,10 @@ private class TorrentTransfer(
     @Volatile private var count = 0
     @Volatile private var paths: List<File> = emptyList()
     @Volatile private var about = Triple("", "", 0L)
+    @Volatile private var info: TorrentInfo? = null
+    @Volatile private var url = ""
+    /** All wanted bytes are on disk; the handle then stays in the session for [seed]. */
+    @Volatile private var complete = false
 
     override suspend fun run(): Long = withContext(Dispatchers.IO) {
         engine.ensureStarted()
@@ -184,7 +189,11 @@ private class TorrentTransfer(
         count = ti.numFiles()
         about = Bencode.about(file.readBytes())
         Bencode.webSeeds(file.readBytes()).forEach { url -> if (url !in h.urlSeeds()) h.addUrlSeed(url) }
-        e.extraTrackers.lines().map(String::trim).filter { it.isNotEmpty() }.forEach { h.addTracker(AnnounceEntry(it)) }
+        (e.extraTrackers.lines() + engine.settings.torrentDefaultTrackers.lines())
+            .map(String::trim).filter { it.isNotEmpty() }.distinct()
+            .forEach { h.addTracker(AnnounceEntry(it)) }
+        info = ti
+        url = e.url
         h.setDownloadLimit(e.downLimit)
         h.setUploadLimit(e.upLimit)
         h.resume()
@@ -195,10 +204,33 @@ private class TorrentTransfer(
                 publishLive(h, ti, st, e.url)
                 if (st.totalWanted() > 0 && st.totalWantedDone() >= st.totalWanted() &&
                     st.state() != TorrentStatus.State.CHECKING_FILES && st.state() != TorrentStatus.State.CHECKING_RESUME_DATA
-                ) return@withContext st.totalWanted()
+                ) {
+                    complete = true
+                    return@withContext st.totalWanted()
+                }
                 delay(500)
             }
             @Suppress("UNREACHABLE_CODE") 0L
+        } finally {
+            if (!complete) withContext(NonCancellable) { runCatching { engine.session.remove(h) } }
+        }
+    }
+
+    override suspend fun seed(onStart: () -> Unit) = withContext(Dispatchers.IO) {
+        val h = handle ?: return@withContext
+        try {
+            val ti = info ?: return@withContext
+            if (!complete || !engine.settings.torrentSeed || !h.isValid) return@withContext
+            onStart()
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val st = h.status(TorrentHandle.QUERY_PIECES)
+                publishLive(h, ti, st, url)
+                // Read each time: lowering the ratio in Settings stops a running seed.
+                val limit = engine.settings.torrentSeedRatio
+                if (limit > 0 && st.allTimeUpload() * 100 >= limit.toLong() * st.totalWanted().coerceAtLeast(1)) return@withContext
+                delay(1_000)
+            }
         } finally {
             withContext(NonCancellable) { runCatching { engine.session.remove(h) } }
         }

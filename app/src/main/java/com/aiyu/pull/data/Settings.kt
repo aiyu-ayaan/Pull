@@ -44,6 +44,12 @@ data class Settings(
     val torrentDownLimit: Int = 0,
     val torrentUpLimit: Int = 0,
     val torrentConnections: Int = 200,
+    /** Keep uploading a finished torrent until [torrentSeedRatio] is reached. Off by default: mobile data and battery. */
+    val torrentSeed: Boolean = false,
+    /** Upload / size × 100 at which seeding stops; 0 = until the user stops it. */
+    val torrentSeedRatio: Int = 100,
+    /** Tracker URLs, one per line, added to every torrent: more peers on torrents with few trackers. */
+    val torrentDefaultTrackers: String = "",
     /** Defaults for new video downloads; the sheet can change them per download. */
     val video: VideoChoice = VideoChoice(),
     /** Video files through aria2c with several connections, and HLS/DASH fragments in parallel. */
@@ -91,6 +97,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val torrentDownLimit = intPreferencesKey("torrent_down_limit")
         val torrentUpLimit = intPreferencesKey("torrent_up_limit")
         val torrentConnections = intPreferencesKey("torrent_connections")
+        val torrentSeed = booleanPreferencesKey("torrent_seed")
+        val torrentSeedRatio = intPreferencesKey("torrent_seed_ratio")
+        val torrentDefaultTrackers = stringPreferencesKey("torrent_default_trackers")
         val videoMaxRes = intPreferencesKey("video_max_res")
         val videoCodec = stringPreferencesKey("video_codec")
         val videoContainer = stringPreferencesKey("video_container")
@@ -129,6 +138,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             torrentDownLimit = p[Keys.torrentDownLimit] ?: 0,
             torrentUpLimit = p[Keys.torrentUpLimit] ?: 0,
             torrentConnections = p[Keys.torrentConnections] ?: 200,
+            torrentSeed = p[Keys.torrentSeed] ?: false,
+            torrentSeedRatio = p[Keys.torrentSeedRatio] ?: 100,
+            torrentDefaultTrackers = p[Keys.torrentDefaultTrackers] ?: "",
             video = VideoChoice(
                 maxRes = p[Keys.videoMaxRes] ?: 0,
                 codec = p[Keys.videoCodec].enumOr(VideoCodec.ANY),
@@ -192,6 +204,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setUpdateLastChecked(at: Long) = set(Keys.updateLastChecked, at)
     suspend fun setUpdateSnoozedUntil(at: Long) = set(Keys.updateSnoozedUntil, at)
     suspend fun setTorrentConnections(n: Int) = set(Keys.torrentConnections, n.coerceIn(20, 500))
+    suspend fun setTorrentSeed(on: Boolean) = set(Keys.torrentSeed, on)
+    suspend fun setTorrentSeedRatio(percent: Int) = set(Keys.torrentSeedRatio, percent.coerceAtLeast(0))
+    suspend fun setTorrentDefaultTrackers(urls: String) = set(Keys.torrentDefaultTrackers, urls.trim())
     suspend fun setBrowserAdBlock(on: Boolean) = set(Keys.browserAdBlock, on)
     suspend fun setBrowserPopupBlock(on: Boolean) = set(Keys.browserPopupBlock, on)
     suspend fun setBrowserCosmetic(on: Boolean) = set(Keys.browserCosmetic, on)

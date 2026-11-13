@@ -77,6 +77,24 @@
     <string name="status_paused">Paused</string>
     <string name="status_paused_line">Paused · %s</string>
     <string name="status_completed">Completed</string>
+    <string name="status_seeding">Seeding</string>
+    <string name="status_seeding_line">%1$s · seeding ↑ %2$s</string>
+    <string name="action_stop_seeding">Stop seeding</string>
+    <string name="torrent_share_magnet">Share magnet link</string>
+    <string name="settings_section_seeding">Seeding</string>
+    <string name="settings_seed">Seed after download</string>
+    <string name="settings_seed_hint">Keep sharing finished torrents with other peers. Uses data and battery.</string>
+    <string name="settings_seed_ratio">Stop seeding at ratio</string>
+    <string name="ratio_half">0.5</string>
+    <string name="ratio_one">1.0</string>
+    <string name="ratio_two">2.0</string>
+    <string name="ratio_unlimited">Never (stop by hand)</string>
+    <string name="settings_default_trackers">Extra trackers</string>
+    <string name="settings_default_trackers_hint">Added to every torrent to find more peers. One URL per line.</string>
+    <plurals name="trackers_count">
+        <item quantity="one">%d tracker added to every torrent</item>
+        <item quantity="other">%d trackers added to every torrent</item>
+    </plurals>
     <string name="status_failed">Failed</string>
     <string name="status_link_expired">Link expired · tap to get a new one</string>
     <string name="status_connecting">Connecting…</string>

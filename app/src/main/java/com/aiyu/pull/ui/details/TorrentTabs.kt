@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -319,6 +320,7 @@ fun TorrentMenu(
     onLimits: () -> Unit,
     onAddTrackers: () -> Unit,
     onSelectFiles: () -> Unit,
+    onShareMagnet: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) { Icon(Icons.Rounded.MoreVert, stringResource(R.string.cd_more)) }
@@ -347,6 +349,10 @@ fun TorrentMenu(
         DropdownMenuItem(
             text = { Text(stringResource(R.string.trackers_reannounce)) }, leadingIcon = { Icon(Icons.Rounded.Campaign, null) },
             enabled = running, onClick = { open = false; onCommand(TorrentCommand.Reannounce) },
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.torrent_share_magnet)) }, leadingIcon = { Icon(Icons.Rounded.Share, null) },
+            onClick = { open = false; onShareMagnet() },
         )
     }
 }

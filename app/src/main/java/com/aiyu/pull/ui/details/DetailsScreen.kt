@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -159,6 +160,7 @@ fun DetailsScreen(
                         onLimits = { askLimits = true },
                         onAddTrackers = { askTrackers = true },
                         onSelectFiles = { pickFiles = true },
+                        onShareMagnet = { com.aiyu.pull.ui.components.shareLink(context, e.url) },
                     )
                 },
                 scrollBehavior = scroll,
@@ -377,6 +379,7 @@ private fun statusText(view: DownloadView): String = when (view.entity.status) {
     }
     Status.QUEUED -> stringResource(R.string.status_queued)
     Status.PAUSED -> stringResource(R.string.status_paused)
+    Status.COMPLETED if view.seeding -> stringResource(R.string.status_seeding)
     Status.COMPLETED -> stringResource(R.string.status_completed)
     Status.FAILED -> stringResource(R.string.status_failed)
 }
@@ -402,6 +405,10 @@ private fun Actions(
                 Text(stringResource(R.string.action_resume))
             }
             Status.COMPLETED -> {
+                if (view.seeding) FilledTonalButton(onClick = onPause, shapes = ButtonDefaults.shapes()) {
+                    Icon(Icons.Rounded.Stop, null, Modifier.size(ButtonDefaults.IconSize)); Spacer(Modifier.width(Dimens.sm))
+                    Text(stringResource(R.string.action_stop_seeding))
+                }
                 Button(onClick = onOpen, shapes = ButtonDefaults.shapes()) {
                     Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(ButtonDefaults.IconSize)); Spacer(Modifier.width(Dimens.sm))
                     Text(stringResource(R.string.action_open))
