@@ -24,6 +24,15 @@ import com.aiyu.pull.update.UpdateChannel
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
+/** Search engines selectable for the built-in browser address bar. */
+enum class SearchEngine(val displayName: String, val searchUrl: String) {
+    GOOGLE("Google", "https://www.google.com/search?q="),
+    DUCKDUCKGO("DuckDuckGo", "https://duckduckgo.com/?q="),
+    BING("Bing", "https://www.bing.com/search?q="),
+    BRAVE("Brave Search", "https://search.brave.com/search?q="),
+    STARTPAGE("Startpage", "https://www.startpage.com/sp/search?q="),
+}
+
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = false,
@@ -63,6 +72,8 @@ data class Settings(
     val browserAdBlock: Boolean = true,
     val browserPopupBlock: Boolean = true,
     val browserCosmetic: Boolean = true,
+    val browserSearchEngine: SearchEngine = SearchEngine.GOOGLE,
+    val browserInterceptByExtension: Boolean = true,
 )
 
 /** BitTorrent protocol encryption: allow both, require it, or never use it. */
@@ -117,6 +128,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val browserAdBlock = booleanPreferencesKey("browser_ad_block")
         val browserPopupBlock = booleanPreferencesKey("browser_popup_block")
         val browserCosmetic = booleanPreferencesKey("browser_cosmetic")
+        val browserSearchEngine = stringPreferencesKey("browser_search_engine")
+        val browserInterceptByExtension = booleanPreferencesKey("browser_intercept_by_extension")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -160,6 +173,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             browserAdBlock = p[Keys.browserAdBlock] ?: true,
             browserPopupBlock = p[Keys.browserPopupBlock] ?: true,
             browserCosmetic = p[Keys.browserCosmetic] ?: true,
+            browserSearchEngine = p[Keys.browserSearchEngine].enumOr(SearchEngine.GOOGLE),
+            browserInterceptByExtension = p[Keys.browserInterceptByExtension] ?: true,
         )
     }
 
@@ -210,6 +225,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setBrowserAdBlock(on: Boolean) = set(Keys.browserAdBlock, on)
     suspend fun setBrowserPopupBlock(on: Boolean) = set(Keys.browserPopupBlock, on)
     suspend fun setBrowserCosmetic(on: Boolean) = set(Keys.browserCosmetic, on)
+    suspend fun setBrowserSearchEngine(engine: SearchEngine) = set(Keys.browserSearchEngine, engine.name)
+    suspend fun setBrowserInterceptByExtension(on: Boolean) = set(Keys.browserInterceptByExtension, on)
 
     companion object {
         /** Starter templates; the user edits or deletes them on the Command templates screen. */

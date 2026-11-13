@@ -1,6 +1,9 @@
 package com.aiyu.pull.browser
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Message
@@ -12,13 +15,17 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,9 +42,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddLink
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Bookmarks
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DesktopWindows
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
@@ -45,10 +61,14 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.BottomAppBarDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -79,6 +99,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -90,13 +111,13 @@ import com.aiyu.pull.ui.components.heroBrush
 import com.aiyu.pull.ui.theme.Dimens
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.net.URLEncoder
 
-private const val SEARCH_ENGINE = "https://www.google.com/search?q="
+private data class LongPressTarget(val url: String, val pageUrl: String?, val userAgent: String?)
 
 /**
  * Tabbed WebView browser with ad blocker, popup blocker, and download capture.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(
@@ -112,6 +133,9 @@ fun BrowserScreen(
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val history by vm.history.collectAsStateWithLifecycle()
+    val bookmarks by vm.bookmarks.collectAsStateWithLifecycle()
+    val shortcuts by vm.shortcuts.collectAsStateWithLifecycle()
     val target by remember(refreshId) { vm.target(refreshId) }.collectAsStateWithLifecycle(null)
 
     val tabs = remember { mutableStateListOf<BrowserTab>() }
@@ -120,8 +144,16 @@ fun BrowserScreen(
 
     var showShield by remember { mutableStateOf(false) }
     var showTabs by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showBookmarks by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
+    var showAddShortcut by remember { mutableStateOf(false) }
+    var longPressTarget by remember { mutableStateOf<LongPressTarget?>(null) }
 
     val activeTab: BrowserTab? = tabs.find { it.id == activeTabId } ?: tabs.firstOrNull()
+    val isCurrentBookmarked by remember(activeTab?.url) {
+        vm.isBookmarked(activeTab?.url.orEmpty())
+    }.collectAsStateWithLifecycle(false)
 
     var address by rememberSaveable { mutableStateOf(startUrl.orEmpty()) }
     var textFieldValue by remember { mutableStateOf(TextFieldValue(address)) }
@@ -143,8 +175,26 @@ fun BrowserScreen(
 
     var lastPopupTime by remember { mutableLongStateOf(0L) }
 
+    val onLongPress: (String, String?, String?) -> Unit = { url, pageUrl, ua ->
+        longPressTarget = LongPressTarget(url, pageUrl, ua)
+    }
+    val onRecordHistory: (String, String) -> Unit = { url, title ->
+        vm.recordHistory(url, title)
+    }
+
     var createTabRef: ((String, Boolean, Boolean) -> BrowserTab)? = null
     var closeTabRef: ((Long) -> Unit)? = null
+
+    fun navigateTo(input: String) {
+        focus.clearFocus()
+        val targetUrl = resolveAddressInput(input, settings.browserSearchEngine)
+        if (targetUrl.isNotBlank()) {
+            address = targetUrl
+            textFieldValue = TextFieldValue(targetUrl)
+            activeTab?.url = targetUrl
+            activeTab?.webView?.loadUrl(targetUrl)
+        }
+    }
 
     fun closeTab(id: Long) {
         val index = tabs.indexOfFirst { it.id == id }
@@ -163,6 +213,8 @@ fun BrowserScreen(
                     { lastPopupTime },
                     { lastPopupTime = it },
                     onCatch,
+                    onLongPress,
+                    onRecordHistory,
                     { closeTabRef?.invoke(it) },
                     { createTabRef?.invoke("", true, true) ?: error("Not initialized") },
                 )
@@ -194,6 +246,8 @@ fun BrowserScreen(
             { lastPopupTime },
             { lastPopupTime = it },
             onCatch,
+            onLongPress,
+            onRecordHistory,
             { closeTabRef?.invoke(it) },
             { createTabRef?.invoke("", true, true) ?: error("Not initialized") },
         )
@@ -224,6 +278,8 @@ fun BrowserScreen(
                 { lastPopupTime },
                 { lastPopupTime = it },
                 onCatch,
+                onLongPress,
+                onRecordHistory,
                 { closeTabRef?.invoke(it) },
                 { createTabRef?.invoke("", true, true) ?: error("Not initialized") },
             )
@@ -253,6 +309,9 @@ fun BrowserScreen(
     }
 
     // Back handling priority
+    BackHandler(enabled = longPressTarget != null) { longPressTarget = null }
+    BackHandler(enabled = showBookmarks) { showBookmarks = false }
+    BackHandler(enabled = showHistory) { showHistory = false }
     BackHandler(enabled = showTabs) { showTabs = false }
     BackHandler(enabled = showShield) { showShield = false }
     BackHandler(enabled = activeTab?.canBack == true) { activeTab?.webView?.goBack() }
@@ -304,13 +363,7 @@ fun BrowserScreen(
                         ),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = {
-                            focus.clearFocus()
-                            val targetUrl = toUrl(textFieldValue.text)
-                            if (targetUrl.isNotBlank()) {
-                                address = targetUrl
-                                activeTab?.url = targetUrl
-                                activeTab?.webView?.loadUrl(targetUrl)
-                            }
+                            navigateTo(textFieldValue.text)
                         }),
                         modifier = Modifier
                             .weight(1f)
@@ -331,6 +384,124 @@ fun BrowserScreen(
                                 isFocused = state.isFocused
                             },
                     )
+                    Box {
+                        IconButton(onClick = { showMenu = true }, shapes = IconButtonDefaults.shapes()) {
+                            Icon(Icons.Rounded.MoreVert, stringResource(R.string.browser_more_options))
+                        }
+                        val hasPage = activeTab?.url?.isNotBlank() == true && activeTab.url != "about:blank"
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.browser_desktop_site)) },
+                                leadingIcon = { Icon(Icons.Rounded.DesktopWindows, null) },
+                                trailingIcon = if (activeTab?.isDesktopMode == true) {
+                                    { Icon(Icons.Rounded.Check, null) }
+                                } else null,
+                                onClick = {
+                                    showMenu = false
+                                    activeTab?.let { it.applyDesktopMode(!it.isDesktopMode) }
+                                },
+                            )
+                            if (hasPage) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(
+                                                if (isCurrentBookmarked) R.string.browser_bookmark_remove
+                                                else R.string.browser_bookmark_add,
+                                            ),
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (isCurrentBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                                            null,
+                                        )
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        val tab = activeTab ?: return@DropdownMenuItem
+                                        vm.toggleBookmark(tab.url, tab.displayTitle, isCurrentBookmarked)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.browser_add_to_shortcuts)) },
+                                    leadingIcon = { Icon(Icons.Rounded.AddLink, null) },
+                                    onClick = {
+                                        showMenu = false
+                                        val tab = activeTab ?: return@DropdownMenuItem
+                                        vm.addShortcut(tab.url, tab.displayTitle)
+                                        Toast.makeText(context, R.string.browser_shortcut_added, Toast.LENGTH_SHORT).show()
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.browser_bookmarks)) },
+                                leadingIcon = { Icon(Icons.Rounded.Bookmarks, null) },
+                                onClick = {
+                                    showMenu = false
+                                    showBookmarks = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.browser_history)) },
+                                leadingIcon = { Icon(Icons.Rounded.History, null) },
+                                onClick = {
+                                    showMenu = false
+                                    showHistory = true
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // Address bar suggestions from bookmarks & history while focused
+                val query = textFieldValue.text.trim()
+                if (isFocused && query.isNotEmpty()) {
+                    val suggestions = remember(query, bookmarks, history) {
+                        val bMatches = bookmarks
+                            .filter { it.url.contains(query, ignoreCase = true) || it.title.contains(query, ignoreCase = true) }
+                            .take(3)
+                            .map { Triple(it.title, it.url, true) }
+                        val seenUrls = bMatches.mapTo(HashSet()) { it.second }
+                        val hMatches = history
+                            .asSequence()
+                            .filter { it.url !in seenUrls && (it.url.contains(query, ignoreCase = true) || it.title.contains(query, ignoreCase = true)) }
+                            .distinctBy { it.url }
+                            .take(5 - bMatches.size)
+                            .map { Triple(it.title, it.url, false) }
+                            .toList()
+                        bMatches + hMatches
+                    }
+                    if (suggestions.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column {
+                                suggestions.forEach { (title, url, isBookmark) ->
+                                    ListItem(
+                                        headlineContent = {
+                                            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        },
+                                        supportingContent = {
+                                            Text(url, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        },
+                                        leadingContent = {
+                                            Icon(
+                                                if (isBookmark) Icons.Rounded.Bookmark else Icons.Rounded.History,
+                                                contentDescription = null,
+                                            )
+                                        },
+                                        modifier = Modifier.clickable { navigateTo(url) },
+                                    )
+                                    HorizontalDivider()
+                                }
+                            }
+                        }
+                    }
                 }
 
                 val currentProgress = activeTab?.progress ?: 100
@@ -429,6 +600,7 @@ fun BrowserScreen(
                     AndroidView(
                         factory = {
                             (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
+                            tab.webView.isHapticFeedbackEnabled = false
                             tab.webView
                         },
                         modifier = Modifier.fillMaxSize(),
@@ -458,6 +630,65 @@ fun BrowserScreen(
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(Dimens.xl))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.sm, Alignment.CenterHorizontally),
+                        verticalArrangement = Arrangement.spacedBy(Dimens.sm),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        shortcuts.forEach { shortcut ->
+                            Surface(
+                                onClick = { navigateTo(shortcut.url) },
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(start = Dimens.md, end = Dimens.xs, top = Dimens.xs, bottom = Dimens.xs),
+                                ) {
+                                    Text(
+                                        text = shortcut.title,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    IconButton(
+                                        onClick = { vm.deleteShortcut(shortcut.id) },
+                                        modifier = Modifier.size(28.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Close,
+                                            contentDescription = stringResource(R.string.action_close),
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Surface(
+                            onClick = { showAddShortcut = true },
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = Dimens.md, vertical = Dimens.sm),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Add,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(Dimens.xs))
+                                Text(
+                                    text = stringResource(R.string.browser_add_shortcut),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -502,22 +733,69 @@ fun BrowserScreen(
             onDismiss = { showTabs = false },
         )
     }
+
+    longPressTarget?.let { lp ->
+        LongPressTargetSheet(
+            url = lp.url,
+            onDownloadWithPull = {
+                onCatch(lp.url, lp.userAgent, null, null, lp.pageUrl)
+            },
+            onOpenInNewTab = {
+                createTab(lp.url, select = true)
+            },
+            onCopyLink = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                cm?.setPrimaryClip(ClipData.newPlainText("URL", lp.url))
+                Toast.makeText(context, R.string.browser_link_copied, Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { longPressTarget = null },
+        )
+    }
+
+    if (showBookmarks) {
+        BookmarksSheet(
+            bookmarks = bookmarks,
+            onSelect = { navigateTo(it) },
+            onDelete = { vm.deleteBookmark(it) },
+            onDismiss = { showBookmarks = false },
+        )
+    }
+
+    if (showHistory) {
+        HistorySheet(
+            history = history,
+            onSelect = { navigateTo(it) },
+            onDelete = { vm.deleteHistoryItem(it) },
+            onClearAll = { vm.clearHistory() },
+            onDismiss = { showHistory = false },
+        )
+    }
+
+    if (showAddShortcut) {
+        AddShortcutDialog(
+            onAdd = { url, title -> vm.addShortcut(url, title) },
+            onDismiss = { showAddShortcut = false },
+        )
+    }
 }
 
 /** Configures settings and clients for a [BrowserTab]'s WebView. */
 @SuppressLint("SetJavaScriptEnabled")
 private fun setupTabWebView(
     tab: BrowserTab,
-    context: android.content.Context,
+    context: Context,
     adBlocker: AdBlocker,
     getSettings: () -> com.aiyu.pull.data.Settings,
     getLastPopupTime: () -> Long,
     setLastPopupTime: (Long) -> Unit,
     onCatch: (url: String, ua: String?, disposition: String?, mime: String?, page: String?) -> Unit,
+    onLongPress: (url: String, pageUrl: String?, userAgent: String?) -> Unit,
+    onRecordHistory: (url: String, title: String) -> Unit,
     onCloseTab: (Long) -> Unit,
     onCreateNewTab: () -> BrowserTab,
 ) {
     val wv = tab.webView
+    wv.isHapticFeedbackEnabled = false
     wv.settings.apply {
         javaScriptEnabled = true
         domStorageEnabled = true
@@ -548,6 +826,15 @@ private fun setupTabWebView(
                     val intent = Intent(Intent.ACTION_VIEW, request.url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 }
+                if (tab.isPopupCandidate) {
+                    onCloseTab(tab.id)
+                }
+                return true
+            }
+
+            // 3. Intercept downloadable file extensions
+            if (currentSettings.browserInterceptByExtension && shouldInterceptByExtension(dest)) {
+                onCatch(dest, view.settings.userAgentString, null, null, view.url)
                 if (tab.isPopupCandidate) {
                     onCloseTab(tab.id)
                 }
@@ -599,6 +886,12 @@ private fun setupTabWebView(
             val currentSettings = getSettings()
             if (currentSettings.browserAdBlock && currentSettings.browserCosmetic) {
                 view.evaluateJavascript(AdBlocker.INJECT_COSMETIC_SCRIPT, null)
+            }
+        }
+
+        override fun onPageFinished(view: WebView, url: String) {
+            if (!tab.isIncognito && url.isNotBlank() && url != "about:blank") {
+                onRecordHistory(url, view.title.orEmpty().ifBlank { url })
             }
         }
 
@@ -676,15 +969,22 @@ private fun setupTabWebView(
     wv.setDownloadListener { url, ua, disposition, mime, _ ->
         onCatch(url, ua, disposition, mime, tab.url)
     }
-}
 
-/** Address bar text to a URL: anything that looks like a host loads, the rest is a search. */
-private fun toUrl(text: String): String {
-    val t = text.trim()
-    if (t.isEmpty()) return ""
-    return when {
-        t.startsWith("http://") || t.startsWith("https://") || t.startsWith("about:") -> t
-        !t.contains(' ') && t.contains('.') -> "https://$t"
-        else -> SEARCH_ENGINE + URLEncoder.encode(t, "UTF-8")
+    wv.setOnLongClickListener { view ->
+        val hit = (view as? WebView)?.hitTestResult ?: return@setOnLongClickListener false
+        when (hit.type) {
+            WebView.HitTestResult.SRC_ANCHOR_TYPE,
+            WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE,
+            WebView.HitTestResult.IMAGE_TYPE -> {
+                val extra = hit.extra
+                if (!extra.isNullOrBlank() && (extra.startsWith("http://") || extra.startsWith("https://"))) {
+                    onLongPress(extra, tab.url, wv.settings.userAgentString)
+                    true
+                } else {
+                    false
+                }
+            }
+            else -> false
+        }
     }
 }

@@ -22,7 +22,6 @@ import com.aiyu.pull.ui.add.AddDownloadSheet
 import com.aiyu.pull.ui.add.AddRequest
 import com.aiyu.pull.ui.settings.SettingsViewModel
 import com.aiyu.pull.ui.theme.PullTheme
-import com.aiyu.pull.ui.theme.WithClickHaptics
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.serialization.json.Json
 
@@ -51,31 +50,29 @@ class BrowserActivity : ComponentActivity() {
             val s = settings ?: return@setContent
             var adding by rememberSaveable(stateSaver = addSaver) { mutableStateOf(null) }
             PullTheme(s.themeMode, s.dynamicColor) {
-                WithClickHaptics {
-                    key(launch) {
-                        BrowserScreen(
-                            startUrl = url,
-                            refreshId = refreshId,
-                            vm = hiltViewModel(),
-                            onDownload = { adding = it },
-                            onRefreshed = {
-                                Toast.makeText(this, R.string.browser_link_updated, Toast.LENGTH_LONG).show()
-                                finish()
-                            },
-                            onClose = { finish() },
-                        )
-                    }
-                    adding?.let { request ->
-                        AddDownloadSheet(
-                            request = request,
-                            vm = hiltViewModel(),
-                            onDismiss = { adding = null },
-                            onAdded = {
-                                adding = null
-                                Toast.makeText(this, R.string.browser_added, Toast.LENGTH_SHORT).show()
-                            },
-                        )
-                    }
+                key(launch) {
+                    BrowserScreen(
+                        startUrl = url,
+                        refreshId = refreshId,
+                        vm = hiltViewModel(),
+                        onDownload = { adding = it },
+                        onRefreshed = {
+                            Toast.makeText(this, R.string.browser_link_updated, Toast.LENGTH_LONG).show()
+                            finish()
+                        },
+                        onClose = { finish() },
+                    )
+                }
+                adding?.let { request ->
+                    AddDownloadSheet(
+                        request = request,
+                        vm = hiltViewModel(),
+                        onDismiss = { adding = null },
+                        onAdded = {
+                            adding = null
+                            Toast.makeText(this, R.string.browser_added, Toast.LENGTH_SHORT).show()
+                        },
+                    )
                 }
             }
         }

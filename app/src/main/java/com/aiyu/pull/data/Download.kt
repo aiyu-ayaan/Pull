@@ -191,15 +191,19 @@ interface DownloadDao {
 }
 
 @Database(
-    entities = [DownloadEntity::class],
-    version = 4,
+    entities = [DownloadEntity::class, HistoryEntity::class, BookmarkEntity::class, ShortcutEntity::class],
+    version = 5,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5),
     ],
 )
 abstract class PullDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao
+    abstract fun history(): BrowserHistoryDao
+    abstract fun bookmarks(): BookmarkDao
+    abstract fun shortcuts(): ShortcutDao
 }

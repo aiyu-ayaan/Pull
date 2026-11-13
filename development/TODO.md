@@ -72,12 +72,12 @@ Design docs: [docs/README.md](docs/README.md). Phases follow `docs/07-features-a
 
 - [x] WebView screen with `androidx.webkit`; Safe Browsing on; algorithmic darkening in dark theme
 - [x] Tabs (+ incognito), tab switcher grid
-- [ ] Address bar + search engine setting + suggestions
-- [ ] History and bookmarks (Room)
-- [ ] Desktop mode toggle
+- [x] Address bar + search engine setting + suggestions
+- [x] History and bookmarks (Room)
+- [x] Desktop mode toggle
 - [x] `DownloadListener` → add-download sheet with cookies (`CookieManager`), UA, Referer
-- [ ] Intercept-by-extension setting in `shouldOverrideUrlLoading`
-- [ ] Long-press link/image → "Download with Pull"
+- [x] Intercept-by-extension setting in `shouldOverrideUrlLoading`
+- [x] Long-press link/image → "Download with Pull"
 - [x] Bottom toolbar: back, forward, reload, home, tabs count, shield badge
 
 ## Phase 5 — Ad blocker & popup blocker

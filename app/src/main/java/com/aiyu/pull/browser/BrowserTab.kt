@@ -19,6 +19,7 @@ class BrowserTab(
     initialUrl: String = "",
     initialTitle: String = "",
     var isPopupCandidate: Boolean = false,
+    val isIncognito: Boolean = false,
 ) {
     var url by mutableStateOf(initialUrl)
     var title by mutableStateOf(initialTitle)
@@ -27,6 +28,24 @@ class BrowserTab(
     var canBack by mutableStateOf(false)
     var canForward by mutableStateOf(false)
     var blockedCount by mutableIntStateOf(0)
+    var isDesktopMode by mutableStateOf(false)
+        private set
+
+    private val defaultUserAgent: String = webView.settings.userAgentString
+
+    /** Switches this tab between mobile and desktop user-agent and viewport settings. */
+    fun applyDesktopMode(enabled: Boolean) {
+        if (isDesktopMode == enabled) return
+        isDesktopMode = enabled
+        webView.settings.apply {
+            userAgentString = if (enabled) DESKTOP_USER_AGENT else defaultUserAgent
+            useWideViewPort = enabled
+            loadWithOverviewMode = enabled
+        }
+        if (url.isNotBlank() && url != "about:blank") {
+            webView.reload()
+        }
+    }
 
     val displayTitle: String
         get() = when {

@@ -2,8 +2,11 @@ package com.aiyu.pull.di
 
 import android.content.Context
 import androidx.room.Room
+import com.aiyu.pull.data.BookmarkDao
+import com.aiyu.pull.data.BrowserHistoryDao
 import com.aiyu.pull.data.DownloadDao
 import com.aiyu.pull.data.PullDatabase
+import com.aiyu.pull.data.ShortcutDao
 import com.aiyu.pull.engine.segmentClient
 import dagger.Module
 import dagger.Provides
@@ -22,6 +25,15 @@ object AppModule {
 
     @Provides
     fun downloadDao(db: PullDatabase): DownloadDao = db.downloads()
+
+    @Provides
+    fun historyDao(db: PullDatabase): BrowserHistoryDao = db.history()
+
+    @Provides
+    fun bookmarkDao(db: PullDatabase): BookmarkDao = db.bookmarks()
+
+    @Provides
+    fun shortcutDao(db: PullDatabase): ShortcutDao = db.shortcuts()
 
     /** HTTP/1.1 only, so every segment gets its own TCP connection. */
     @Provides @Singleton

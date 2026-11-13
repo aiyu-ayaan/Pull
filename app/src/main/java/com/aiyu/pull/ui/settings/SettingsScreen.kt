@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
@@ -68,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aiyu.pull.BuildConfig
 import com.aiyu.pull.R
 import com.aiyu.pull.data.Encryption
+import com.aiyu.pull.data.SearchEngine
 import com.aiyu.pull.data.Settings
 import com.aiyu.pull.data.ThemeMode
 import com.aiyu.pull.video.AudioFormat
@@ -95,6 +97,7 @@ enum class SettingsPage(val title: Int, val summary: Int, val onHome: Boolean = 
     DOWNLOADS(R.string.settings_downloads, R.string.settings_downloads_summary),
     TORRENTS(R.string.settings_torrents, R.string.settings_torrents_summary),
     VIDEO(R.string.settings_video, R.string.settings_video_summary),
+    BROWSER(R.string.settings_browser, R.string.settings_browser_summary),
     APPEARANCE(R.string.settings_appearance, R.string.settings_appearance_summary),
     UPDATES(R.string.settings_updates, R.string.settings_updates_summary),
     ABOUT(R.string.settings_about, R.string.settings_about_summary),
@@ -110,6 +113,7 @@ private fun SettingsPage.look(): PageLook {
         SettingsPage.DOWNLOADS -> PageLook(Icons.Rounded.Download, MaterialShapes.Cookie9Sided, c.primaryContainer, c.onPrimaryContainer)
         SettingsPage.TORRENTS -> PageLook(Icons.Rounded.Hub, MaterialShapes.Clover4Leaf, c.tertiaryContainer, c.onTertiaryContainer)
         SettingsPage.VIDEO -> PageLook(Icons.Rounded.SmartDisplay, MaterialShapes.Sunny, c.secondaryContainer, c.onSecondaryContainer)
+        SettingsPage.BROWSER -> PageLook(Icons.Rounded.Public, MaterialShapes.Flower, c.tertiaryContainer, c.onTertiaryContainer)
         SettingsPage.APPEARANCE -> PageLook(Icons.Rounded.Palette, MaterialShapes.Cookie7Sided, c.primaryContainer, c.onPrimaryContainer)
         SettingsPage.UPDATES -> PageLook(Icons.Rounded.SystemUpdate, MaterialShapes.Gem, c.secondaryContainer, c.onSecondaryContainer)
         SettingsPage.ABOUT, SettingsPage.ACKNOWLEDGEMENTS -> PageLook(Icons.Rounded.Info, MaterialShapes.Circle, c.surfaceContainerHighest, c.onSurfaceVariant)
@@ -148,6 +152,7 @@ fun SettingsPageScreen(page: SettingsPage, vm: SettingsViewModel, onBack: () -> 
             SettingsPage.DOWNLOADS -> downloads(settings, vm)
             SettingsPage.TORRENTS -> torrents(settings, vm)
             SettingsPage.VIDEO -> video(settings, vm)
+            SettingsPage.BROWSER -> browser(settings, vm)
             SettingsPage.APPEARANCE -> appearance(settings, vm)
             SettingsPage.UPDATES -> updates()
             SettingsPage.ABOUT -> about(onOpenAcknowledgements = { onPage(SettingsPage.ACKNOWLEDGEMENTS) })
@@ -348,6 +353,46 @@ private fun LazyListScope.updates() {
 }
 
 private val whenFormat = java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT)
+
+private fun LazyListScope.browser(s: Settings, vm: SettingsViewModel) {
+    item {
+        Section(R.string.settings_section_search) {
+            ChoiceItem(
+                R.string.settings_search_engine,
+                options = listOf(
+                    SearchEngine.GOOGLE to R.string.search_engine_google,
+                    SearchEngine.DUCKDUCKGO to R.string.search_engine_duckduckgo,
+                    SearchEngine.BING to R.string.search_engine_bing,
+                    SearchEngine.BRAVE to R.string.search_engine_brave,
+                    SearchEngine.STARTPAGE to R.string.search_engine_startpage,
+                ),
+                selected = s.browserSearchEngine,
+            ) { engine -> vm.update { setBrowserSearchEngine(engine) } }
+        }
+    }
+    item {
+        Section(R.string.settings_section_browser_downloads) {
+            SwitchItem(
+                R.string.settings_intercept_extensions,
+                R.string.settings_intercept_extensions_hint,
+                s.browserInterceptByExtension,
+            ) { on -> vm.update { setBrowserInterceptByExtension(on) } }
+        }
+    }
+    item {
+        Section(R.string.settings_section_shield) {
+            SwitchItem(R.string.browser_ad_block, R.string.browser_ad_block_desc, s.browserAdBlock) { on ->
+                vm.update { setBrowserAdBlock(on) }
+            }
+            SwitchItem(R.string.browser_popup_block, R.string.browser_popup_block_desc, s.browserPopupBlock) { on ->
+                vm.update { setBrowserPopupBlock(on) }
+            }
+            SwitchItem(R.string.browser_cosmetic, R.string.browser_cosmetic_desc, s.browserCosmetic) { on ->
+                vm.update { setBrowserCosmetic(on) }
+            }
+        }
+    }
+}
 
 private fun LazyListScope.appearance(s: Settings, vm: SettingsViewModel) {
     item {

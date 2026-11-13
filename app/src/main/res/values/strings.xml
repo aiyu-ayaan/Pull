@@ -322,6 +322,7 @@
     <string name="limit_up">Upload</string>
     <string name="cd_more">More options</string>
     <string name="action_apply">Apply</string>
+    <string name="action_add">Add</string>
     <string name="settings_downloads_summary">Connections, queue, resuming</string>
     <string name="settings_torrents">Torrents</string>
     <string name="settings_torrents_summary">Speed limits, DHT, encryption, peers</string>
@@ -480,4 +481,38 @@
     <string name="about_acknowledgements">Acknowledgements</string>
     <string name="about_acknowledgements_desc">Libraries Pull is built on</string>
     <string name="about_acknowledgements_subtitle">Open-source libraries behind Pull</string>
+
+    <!-- Browser Phase 4 -->
+    <string name="settings_browser">Browser</string>
+    <string name="settings_browser_summary">Search engine, link capture, shield</string>
+    <string name="settings_section_search">Search</string>
+    <string name="settings_search_engine">Search engine</string>
+    <string name="search_engine_google">Google</string>
+    <string name="search_engine_duckduckgo">DuckDuckGo</string>
+    <string name="search_engine_bing">Bing</string>
+    <string name="search_engine_brave">Brave Search</string>
+    <string name="search_engine_startpage">Startpage</string>
+    <string name="settings_section_browser_downloads">Downloads</string>
+    <string name="settings_intercept_extensions">Intercept download links</string>
+    <string name="settings_intercept_extensions_hint">Open Pull\'s download sheet when tapping links to archives, installers, documents, and media files.</string>
+    <string name="settings_section_shield">Shield</string>
+    <string name="browser_more_options">More options</string>
+    <string name="browser_desktop_site">Desktop site</string>
+    <string name="browser_bookmark_add">Bookmark page</string>
+    <string name="browser_bookmark_remove">Remove bookmark</string>
+    <string name="browser_bookmarks">Bookmarks</string>
+    <string name="browser_bookmarks_empty">No bookmarks yet</string>
+    <string name="browser_history">History</string>
+    <string name="browser_history_empty">No history yet</string>
+    <string name="browser_history_clear">Clear history</string>
+    <string name="browser_download_with_pull">Download with Pull</string>
+    <string name="browser_open_new_tab">Open in new tab</string>
+    <string name="browser_copy_link">Copy link</string>
+    <string name="browser_link_copied">Link copied</string>
+    <string name="browser_add_to_shortcuts">Add to shortcuts</string>
+    <string name="browser_shortcut_added">Added to shortcuts</string>
+    <string name="browser_add_shortcut">Add shortcut</string>
+    <string name="browser_shortcut_title_hint">Name (optional)</string>
+    <string name="browser_shortcut_url_hint">URL (e.g. example.com)</string>
+    <string name="browser_shortcuts">Shortcuts</string>
 </resources>
