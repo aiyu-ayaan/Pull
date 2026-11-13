@@ -1,0 +1,1 @@
+Pull 0.1.1-alpha.4: a download manager that splits every file into parallel segments. Ad-blocking browser, torrents and video sites included. No accounts, no telemetry.
