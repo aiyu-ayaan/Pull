@@ -6,9 +6,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Environment
 import android.os.Message
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -54,6 +56,7 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
@@ -111,6 +114,7 @@ import com.aiyu.pull.ui.components.heroBrush
 import com.aiyu.pull.ui.theme.Dimens
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 
 private data class LongPressTarget(val url: String, val pageUrl: String?, val userAgent: String?)
 
@@ -136,6 +140,7 @@ fun BrowserScreen(
     val history by vm.history.collectAsStateWithLifecycle()
     val bookmarks by vm.bookmarks.collectAsStateWithLifecycle()
     val shortcuts by vm.shortcuts.collectAsStateWithLifecycle()
+    val allowlistedHosts by vm.allowlistedHosts.collectAsStateWithLifecycle()
     val target by remember(refreshId) { vm.target(refreshId) }.collectAsStateWithLifecycle(null)
 
     val tabs = remember { mutableStateListOf<BrowserTab>() }
@@ -148,6 +153,7 @@ fun BrowserScreen(
     var showBookmarks by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showAddShortcut by remember { mutableStateOf(false) }
+    var showDetectedMedia by remember { mutableStateOf(false) }
     var longPressTarget by remember { mutableStateOf<LongPressTarget?>(null) }
 
     val activeTab: BrowserTab? = tabs.find { it.id == activeTabId } ?: tabs.firstOrNull()
@@ -162,7 +168,9 @@ fun BrowserScreen(
     val onCatch by rememberUpdatedState { url: String, ua: String?, disposition: String?, mime: String?, page: String? ->
         val headers = buildMap {
             ua?.let { put("User-Agent", it) }
-            CookieManager.getInstance().getCookie(url)?.let { put("Cookie", it) }
+            val cookie = CookieManager.getInstance().getCookie(url)
+                ?: page?.let { CookieManager.getInstance().getCookie(it) }
+            cookie?.let { put("Cookie", it) }
             page?.let { put("Referer", it) }
         }
         if (refreshId >= 0) {
@@ -310,6 +318,7 @@ fun BrowserScreen(
 
     // Back handling priority
     BackHandler(enabled = longPressTarget != null) { longPressTarget = null }
+    BackHandler(enabled = showDetectedMedia) { showDetectedMedia = false }
     BackHandler(enabled = showBookmarks) { showBookmarks = false }
     BackHandler(enabled = showHistory) { showHistory = false }
     BackHandler(enabled = showTabs) { showTabs = false }
@@ -546,6 +555,7 @@ fun BrowserScreen(
                     IconButton(onClick = {
                         activeTab?.webView?.loadUrl("about:blank")
                         activeTab?.url = ""
+                        activeTab?.clearDetectedMedia()
                         address = ""
                         textFieldValue = TextFieldValue("")
                     }) {
@@ -553,6 +563,37 @@ fun BrowserScreen(
                     }
 
                     Spacer(Modifier.weight(1f))
+
+                    // M3 Expressive detected media badge/chip when media streams are sniffed
+                    val mediaCount = activeTab?.detectedMedia?.size ?: 0
+                    if (mediaCount > 0) {
+                        Surface(
+                            onClick = { showDetectedMedia = true },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            modifier = Modifier.padding(end = Dimens.xs),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.PlayCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = "$mediaCount media",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
 
                     // Shield icon button with blocked counter badge
                     val blocked = activeTab?.blockedCount ?: 0
@@ -696,6 +737,7 @@ fun BrowserScreen(
 
     if (showShield) {
         val host = activeTab?.url?.let { runCatching { android.net.Uri.parse(it).host }.getOrNull() }.orEmpty()
+        val isHostAllowlisted = remember(host, allowlistedHosts) { vm.isHostAllowlisted(host) }
         ShieldSheet(
             host = host,
             blockedCount = activeTab?.blockedCount ?: 0,
@@ -705,7 +747,33 @@ fun BrowserScreen(
             onPopupBlockToggle = { vm.setPopupBlock(it) },
             cosmeticEnabled = settings.browserCosmetic,
             onCosmeticToggle = { vm.setCosmetic(it) },
+            isHostAllowlisted = isHostAllowlisted,
+            onHostAllowlistToggle = { allow ->
+                vm.setHostAllowlisted(host, allow)
+                if (allow) {
+                    activeTab?.blockedCount = 0
+                }
+                activeTab?.webView?.reload()
+            },
             onDismiss = { showShield = false },
+        )
+    }
+
+    if (showDetectedMedia) {
+        val mediaList = activeTab?.detectedMedia.orEmpty()
+        DetectedMediaSheet(
+            mediaList = mediaList,
+            onSelect = { item ->
+                onCatch(
+                    item.url,
+                    activeTab?.webView?.settings?.userAgentString,
+                    null,
+                    null,
+                    activeTab?.url,
+                )
+            },
+            onClear = { activeTab?.clearDetectedMedia() },
+            onDismiss = { showDetectedMedia = false },
         )
     }
 
@@ -806,6 +874,16 @@ private fun setupTabWebView(
         safeBrowsingEnabled = true
     }
 
+    wv.addJavascriptInterface(
+        PullBridge(
+            context = context,
+            webView = wv,
+            getPageUrl = { tab.url },
+            onCatch = onCatch,
+        ),
+        "PullBridge",
+    )
+
     wv.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val dest = request.url.toString()
@@ -846,14 +924,25 @@ private fun setupTabWebView(
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val currentSettings = getSettings()
-            if (!currentSettings.browserAdBlock) return null
             val reqUrl = request.url.toString()
             // Runs on a WebView IO thread: view.url would throw there, tab.url is safe to read.
-            if (adBlocker.isBlocked(reqUrl, tab.url)) {
+            if (currentSettings.browserAdBlock && adBlocker.isBlocked(reqUrl, tab.url)) {
                 view.post { tab.blockedCount++ }
                 return adBlocker.createBlockedResponse(reqUrl)
             }
+            if (isSniffableMediaUrl(reqUrl, request.requestHeaders["Accept"])) {
+                view.post { tab.recordMedia(reqUrl) }
+            }
             return null
+        }
+
+        override fun onLoadResource(view: WebView, url: String) {
+            val currentSettings = getSettings()
+            if (!(currentSettings.browserAdBlock && adBlocker.isBlocked(url, tab.url))) {
+                if (isSniffableMediaUrl(url)) {
+                    tab.recordMedia(url)
+                }
+            }
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
@@ -869,29 +958,43 @@ private fun setupTabWebView(
                     }
                     return
                 }
+                if (tab.url != url) {
+                    tab.clearDetectedMedia()
+                }
                 tab.url = url
+                if (isSniffableMediaUrl(url)) {
+                    tab.recordMedia(url)
+                }
+            } else {
+                tab.clearDetectedMedia()
             }
 
-            // Inject popup shield script to neutralize JS popup loops
-            if (currentSettings.browserPopupBlock) {
-                view.evaluateJavascript(AdBlocker.POPUP_SHIELD_SCRIPT, null)
-            }
-            // Inject cosmetic CSS
-            if (currentSettings.browserAdBlock && currentSettings.browserCosmetic) {
-                view.evaluateJavascript(AdBlocker.INJECT_COSMETIC_SCRIPT, null)
+            val hostAllowlisted = adBlocker.isHostAllowlisted(url)
+            if (!hostAllowlisted) {
+                // Inject popup shield script to neutralize JS popup loops
+                if (currentSettings.browserPopupBlock) {
+                    view.evaluateJavascript(AdBlocker.POPUP_SHIELD_SCRIPT, null)
+                }
+                // Inject cosmetic CSS
+                if (currentSettings.browserAdBlock && currentSettings.browserCosmetic) {
+                    view.evaluateJavascript(AdBlocker.INJECT_COSMETIC_SCRIPT, null)
+                }
             }
         }
 
         override fun onPageCommitVisible(view: WebView, url: String) {
             val currentSettings = getSettings()
-            if (currentSettings.browserAdBlock && currentSettings.browserCosmetic) {
+            if (!adBlocker.isHostAllowlisted(url) && currentSettings.browserAdBlock && currentSettings.browserCosmetic) {
                 view.evaluateJavascript(AdBlocker.INJECT_COSMETIC_SCRIPT, null)
             }
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            if (!tab.isIncognito && url.isNotBlank() && url != "about:blank") {
-                onRecordHistory(url, view.title.orEmpty().ifBlank { url })
+            if (url.isNotBlank() && url != "about:blank") {
+                view.evaluateJavascript(BLOB_POST_CAPTURE_SCRIPT, null)
+                if (!tab.isIncognito) {
+                    onRecordHistory(url, view.title.orEmpty().ifBlank { url })
+                }
             }
         }
 
@@ -925,8 +1028,9 @@ private fun setupTabWebView(
         ): Boolean {
             if (resultMsg == null) return false
             val currentSettings = getSettings()
+            val pageUrl = view?.url ?: tab.url
 
-            if (currentSettings.browserPopupBlock) {
+            if (currentSettings.browserPopupBlock && !adBlocker.isHostAllowlisted(pageUrl)) {
                 // Block popups triggered without user gesture
                 if (!isUserGesture) {
                     tab.blockedCount++
@@ -936,7 +1040,7 @@ private fun setupTabWebView(
                 // Check hit test result if available
                 val hit = view?.hitTestResult
                 val extra = hit?.extra
-                if (!extra.isNullOrBlank() && adBlocker.isBlocked(extra, view?.url)) {
+                if (!extra.isNullOrBlank() && adBlocker.isBlocked(extra, pageUrl)) {
                     tab.blockedCount++
                     return false
                 }
@@ -967,7 +1071,29 @@ private fun setupTabWebView(
     }
 
     wv.setDownloadListener { url, ua, disposition, mime, _ ->
-        onCatch(url, ua, disposition, mime, tab.url)
+        if (url.startsWith("blob:")) {
+            val guessed = URLUtil.guessFileName(url, disposition, mime)
+            val escapedUrl = url.replace("\\", "\\\\").replace("'", "\\'")
+            val escapedName = guessed.replace("\\", "\\\\").replace("'", "\\'")
+            wv.evaluateJavascript(
+                """
+                (function() {
+                    fetch('$escapedUrl').then(function(r) { return r.blob(); }).then(function(blob) {
+                        var reader = new FileReader();
+                        reader.onloadend = function() {
+                            if (window.PullBridge && reader.result) {
+                                window.PullBridge.onBlobDownload(reader.result, '$escapedName', blob.type || '');
+                            }
+                        };
+                        reader.readAsDataURL(blob);
+                    }).catch(function() {});
+                })();
+                """.trimIndent(),
+                null,
+            )
+        } else {
+            onCatch(url, ua, disposition, mime, tab.url)
+        }
     }
 
     wv.setOnLongClickListener { view ->
@@ -985,6 +1111,49 @@ private fun setupTabWebView(
                 }
             }
             else -> false
+        }
+    }
+}
+
+private class PullBridge(
+    private val context: Context,
+    private val webView: WebView,
+    private val getPageUrl: () -> String,
+    private val onCatch: (url: String, ua: String?, disposition: String?, mime: String?, page: String?) -> Unit,
+) {
+    @JavascriptInterface
+    fun onBlobDownload(dataUrl: String, filename: String?, mimeType: String?) {
+        val decoded = decodeDataUrl(dataUrl)
+        if (decoded != null) {
+            val (resolvedMime, bytes) = decoded
+            val effectiveMime = mimeType?.takeIf { it.isNotBlank() } ?: resolvedMime
+            val safeName = filename?.trim()?.takeIf { it.isNotBlank() }
+                ?.replace(Regex("""[\\/:*?"<>|]"""), "_")
+                ?: URLUtil.guessFileName("https://localhost/download", null, effectiveMime)
+            val dir = runCatching {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    ?.apply { mkdirs() }
+            }.getOrNull()?.takeIf { it.canWrite() }
+                ?: context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.apply { mkdirs() }
+                ?: context.filesDir
+            val outFile = File(dir, safeName)
+            runCatching { outFile.writeBytes(bytes) }
+            webView.post {
+                Toast.makeText(context, "Saved $safeName (${bytes.size} B)", Toast.LENGTH_SHORT).show()
+            }
+        } else if (dataUrl.startsWith("http://") || dataUrl.startsWith("https://")) {
+            webView.post {
+                onCatch(dataUrl, webView.settings.userAgentString, null, mimeType, getPageUrl())
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun onPostDownload(actionUrl: String, formData: String?) {
+        if (actionUrl.startsWith("http://") || actionUrl.startsWith("https://")) {
+            webView.post {
+                onCatch(actionUrl, webView.settings.userAgentString, null, null, getPageUrl())
+            }
         }
     }
 }

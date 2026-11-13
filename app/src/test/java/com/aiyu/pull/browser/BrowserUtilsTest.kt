@@ -81,4 +81,50 @@ class BrowserUtilsTest {
         assertNull(extractFileExtension("https://example.com/trailing."))
         assertNull(extractFileExtension("https://example.com/noext"))
     }
+
+    @Test
+    fun isSniffableMediaUrlMatchesStreamsAndMediaAssets() {
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/live/master.m3u8?token=abc"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/dash/manifest.mpd"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/video/clip.mp4"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/video/clip.webm"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/video/movie.mkv"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/audio/song.mp3"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/audio/track.m4a"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/stream/playlist", "application/vnd.apple.mpegurl"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/stream/manifest", "application/dash+xml"))
+        assertTrue(isSniffableMediaUrl("https://cdn.example.com/stream/play", "video/mp4; codecs=\"avc1\""))
+
+        // Ignore HLS/DASH segment chunks (.ts, .m4s) and non-media pages
+        assertFalse(isSniffableMediaUrl("https://cdn.example.com/live/seg-0001.ts", "video/mp2t"))
+        assertFalse(isSniffableMediaUrl("https://cdn.example.com/dash/chunk-001.m4s", "video/mp4"))
+        assertFalse(isSniffableMediaUrl("https://example.com/index.html"))
+        assertFalse(isSniffableMediaUrl("blob:https://example.com/1234-5678"))
+    }
+
+    @Test
+    fun mediaTypeLabelReturnsFormattedLabels() {
+        assertEquals("HLS", mediaTypeLabel("https://cdn.example.com/master.m3u8"))
+        assertEquals("DASH", mediaTypeLabel("https://cdn.example.com/manifest.mpd"))
+        assertEquals("MP4", mediaTypeLabel("https://cdn.example.com/video.mp4"))
+        assertEquals("WEBM", mediaTypeLabel("https://cdn.example.com/video.webm"))
+        assertEquals("MKV", mediaTypeLabel("https://cdn.example.com/video.mkv"))
+        assertEquals("MP3", mediaTypeLabel("https://cdn.example.com/audio.mp3"))
+        assertEquals("M4A", mediaTypeLabel("https://cdn.example.com/audio.m4a"))
+        assertEquals("HLS", mediaTypeLabel("https://cdn.example.com/stream", "application/x-mpegurl"))
+        assertEquals("DASH", mediaTypeLabel("https://cdn.example.com/stream", "application/dash+xml"))
+    }
+
+    @Test
+    fun decodeDataUrlParsesBase64AndUrlEncodedPayloads() {
+        val base64Res = decodeDataUrl("data:text/plain;base64,SGVsbG8gUHVsbCE=")
+        assertEquals("text/plain", base64Res?.first)
+        assertEquals("Hello Pull!", base64Res?.second?.toString(Charsets.UTF_8))
+
+        val plainRes = decodeDataUrl("data:application/json,%7B%22ok%22%3Atrue%7D")
+        assertEquals("application/json", plainRes?.first)
+        assertEquals("{\"ok\":true}", plainRes?.second?.toString(Charsets.UTF_8))
+
+        assertNull(decodeDataUrl("https://example.com/file.zip"))
+    }
 }

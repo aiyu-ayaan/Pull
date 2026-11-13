@@ -68,4 +68,30 @@ class AdBlockerTest {
         assertEquals("/pagead/ads", adBlocker.extractPath("https://doubleclick.net/pagead/ads?foo=bar"))
         assertEquals("foo=bar", adBlocker.extractQuery("https://doubleclick.net/pagead/ads?foo=bar#hash"))
     }
+
+    @Test
+    fun perSiteAllowlistSkipsBlockingForAllowlistedHostAndSubdomains() {
+        val blocker = AdBlocker { null }
+        val adUrl = "https://googleads.g.doubleclick.net/pagead/ads"
+        val pageUrl = "https://news.example.com/article/1"
+
+        assertTrue(blocker.isBlocked(adUrl, pageUrl))
+        assertFalse(blocker.isHostAllowlisted(pageUrl))
+
+        blocker.setHostAllowlisted("example.com", true)
+        assertTrue(blocker.allowlistedHosts.contains("example.com"))
+        assertTrue(blocker.isHostAllowlisted("example.com"))
+        assertTrue(blocker.isHostAllowlisted("news.example.com"))
+        assertTrue(blocker.isHostAllowlisted(pageUrl))
+
+        // Ad requests on allowlisted page host are not blocked
+        assertFalse(blocker.isBlocked(adUrl, pageUrl))
+        // Ad requests on non-allowlisted page host remain blocked
+        assertTrue(blocker.isBlocked(adUrl, "https://other-site.org/index.html"))
+
+        // Removing from allowlist restores blocking
+        blocker.setHostAllowlisted("example.com", false)
+        assertFalse(blocker.isHostAllowlisted(pageUrl))
+        assertTrue(blocker.isBlocked(adUrl, pageUrl))
+    }
 }

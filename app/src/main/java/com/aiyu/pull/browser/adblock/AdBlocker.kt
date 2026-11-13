@@ -1,33 +1,104 @@
 package com.aiyu.pull.browser.adblock
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.webkit.WebResourceResponse
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.Base64
-import java.util.zip.GZIPInputStream
+import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class AdBlocker(
     private val assetLoader: (() -> InputStream?)?,
+    private val prefs: SharedPreferences? = null,
 ) {
+    constructor(assetLoader: (() -> InputStream?)?) : this(assetLoader, null)
+
     @Inject
     constructor(@ApplicationContext context: Context) : this(
         assetLoader = {
             runCatching { context.assets.open("adblock_domains.txt") }.getOrNull()
         },
+        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
     )
 
     private val domains = HashSet<String>(300_000)
+    private val allowlistSet: MutableSet<String> = Collections.synchronizedSet(LinkedHashSet())
+    private val _allowlistedHosts = MutableStateFlow<Set<String>>(emptySet())
+    val allowlistedHostsFlow: StateFlow<Set<String>> = _allowlistedHosts.asStateFlow()
+
+    val allowlistedHosts: Set<String>
+        get() = _allowlistedHosts.value
 
     init {
+        loadAllowlistedHosts()
         loadStarterDomains()
         loadAssetDomains()
+    }
+
+    private fun loadAllowlistedHosts() {
+        val saved = runCatching {
+            prefs?.getStringSet(KEY_ALLOWLISTED_HOSTS, emptySet()).orEmpty()
+        }.getOrDefault(emptySet())
+        synchronized(allowlistSet) {
+            allowlistSet.clear()
+            saved.mapNotNullTo(allowlistSet) { normalizeHost(it) }
+            _allowlistedHosts.value = allowlistSet.toSet()
+        }
+    }
+
+    /** Normalizes a host or URL into a lowercase hostname without port or trailing dot. */
+    fun normalizeHost(hostOrUrl: String): String? {
+        val trimmed = hostOrUrl.trim()
+        if (trimmed.isEmpty() || trimmed == "about:blank") return null
+        if (trimmed.contains("://")) {
+            return extractHost(trimmed)
+        }
+        val clean = trimmed.substringBefore('/').substringBefore('?').substringBefore('#')
+            .substringBefore(':').lowercase().trimEnd('.')
+        return clean.ifEmpty { null }
+    }
+
+    /** Returns true if [hostOrPageUrl] (or its parent domain) is in [allowlistedHosts]. */
+    fun isHostAllowlisted(hostOrPageUrl: String?): Boolean {
+        if (hostOrPageUrl.isNullOrBlank()) return false
+        var h = normalizeHost(hostOrPageUrl) ?: return false
+        val current = _allowlistedHosts.value
+        if (current.isEmpty()) return false
+        while (h.isNotEmpty()) {
+            if (current.contains(h)) return true
+            val dot = h.indexOf('.')
+            if (dot < 0) break
+            h = h.substring(dot + 1)
+        }
+        return false
+    }
+
+    /** Adds or removes [host] from the per-site allowlist and persists the change. */
+    fun setHostAllowlisted(host: String, allowlisted: Boolean) {
+        val normalized = normalizeHost(host) ?: return
+        val snapshot: Set<String>
+        synchronized(allowlistSet) {
+            if (allowlisted) {
+                allowlistSet.add(normalized)
+            } else {
+                allowlistSet.remove(normalized)
+            }
+            snapshot = allowlistSet.toSet()
+            _allowlistedHosts.value = snapshot
+        }
+        runCatching {
+            prefs?.edit()?.putStringSet(KEY_ALLOWLISTED_HOSTS, snapshot)?.apply()
+        }
     }
 
     private fun loadStarterDomains() {
@@ -73,7 +144,9 @@ class AdBlocker(
      */
     fun isBlocked(url: String, pageUrl: String? = null): Boolean {
         if (url.isBlank() || url == "about:blank") return false
+        if (pageUrl != null && isHostAllowlisted(pageUrl)) return false
         val host = extractHost(url) ?: return false
+        if (isHostAllowlisted(host)) return false
 
         // 1. Direct and hierarchical suffix domain matching against 260,000+ domains
         if (isAdDomain(host)) return true
@@ -226,6 +299,8 @@ class AdBlocker(
     }
 
     companion object {
+        private const val PREFS_NAME = "pull_adblocker_prefs"
+        private const val KEY_ALLOWLISTED_HOSTS = "allowlisted_hosts"
         private val EMPTY_BYTES = ByteArray(0)
         private val TRANSPARENT_1X1_PNG = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",

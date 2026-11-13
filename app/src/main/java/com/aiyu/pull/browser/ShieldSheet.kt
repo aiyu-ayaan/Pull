@@ -47,6 +47,8 @@ fun ShieldSheet(
     onPopupBlockToggle: (Boolean) -> Unit,
     cosmeticEnabled: Boolean,
     onCosmeticToggle: (Boolean) -> Unit,
+    isHostAllowlisted: Boolean = false,
+    onHostAllowlistToggle: (Boolean) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -122,6 +124,17 @@ fun ShieldSheet(
             }
 
             Spacer(Modifier.height(Dimens.md))
+
+            if (host.isNotBlank()) {
+                ListItem(
+                    headlineContent = { Text("Allow ads on $host") },
+                    supportingContent = { Text("Skip ad, popup, and cosmetic blocking on this site") },
+                    leadingContent = { Icon(Icons.Rounded.Shield, null) },
+                    trailingContent = {
+                        Switch(checked = isHostAllowlisted, onCheckedChange = onHostAllowlistToggle)
+                    },
+                )
+            }
 
             ListItem(
                 headlineContent = { Text(stringResource(R.string.browser_ad_block)) },

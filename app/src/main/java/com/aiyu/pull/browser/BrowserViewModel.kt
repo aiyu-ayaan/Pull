@@ -55,6 +55,14 @@ class BrowserViewModel @Inject constructor(
         emptyList(),
     )
 
+    val allowlistedHosts: StateFlow<Set<String>> = adBlocker.allowlistedHostsFlow
+
+    fun setHostAllowlisted(host: String, allowlisted: Boolean) {
+        adBlocker.setHostAllowlisted(host, allowlisted)
+    }
+
+    fun isHostAllowlisted(host: String): Boolean = adBlocker.isHostAllowlisted(host)
+
     fun target(id: Long): Flow<DownloadEntity?> = if (id >= 0) manager.download(id) else flowOf(null)
 
     fun refresh(id: Long, url: String, headers: Map<String, String>, pageUrl: String?) =
