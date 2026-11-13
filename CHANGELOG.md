@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.1.1-alpha.6](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.5...v0.1.1-alpha.6) (2026-11-13)
+
+### Features
+
+* Add peer banning, first/last piece preview priority, and .torrent creator
+* Batch URL patterns, download scheduler, and JSON backup/restore
+* Add multi-IP DNS spreading, mirror URLs, adaptive connections, and checksum verification
+* Add media stream sniffer, blob/POST download bridge, and per-site adblock allowlist
+* Add per-file priorities, tracker management, and .torrent export
+* Add seeding with ratio limit, default trackers, and magnet share
+
+### Bug fixes
+
+* Prevent clipping of active count badge in bottom bar
+* Download videos over several connections
+* Keep downloading when a server caps connections per client
+
+### Other changes
+
+* Update TODO.md for Phase 7 & 8 completed features
+* Remove splash animation from README.md
+* Refactor code structure and remove redundant changes
+* Update TODO.md for Phase 7 engine features and untrack engine/bin
+* Browser: Phase 4 features, shortcuts, history, and disable WebView haptics
+* Engine: fix single-connection fallbacks and add lazy/end-game handling
+
 ## [0.1.1-alpha.5](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.4...v0.1.1-alpha.5) (2026-11-10)
 
 ### Bug fixes
