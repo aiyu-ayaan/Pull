@@ -15,8 +15,6 @@ Pull is an Android download manager built around one idea: a single connection r
 the file into segments, download them in parallel and keep re-splitting the slowest part until the file is done.
 It also downloads torrents and video-site links, and has its own browser.
 
-<p align="center"><img src="development/brand/logo/splash-preview.gif" width="240" alt="Pull splash animation: the comet's head shoots in, then its three trails stretch out behind it"></p>
-<p align="center"><sub>The splash animation, recorded on an API 37 emulator. The comet is the logo: speed, with trails.</sub></p>
 
 <p align="center"><a href="development/media/pull-release-0.1.1-alpha.4.mp4"><img src="development/media/pull-release-0.1.1-alpha.4.gif" width="270" alt="Pull 0.1.1-alpha.4 release video: splash, segmented downloads, the browser Shield, torrents and video sites"></a></p>
 <p align="center"><sub>Release video for 0.1.1-alpha.4 (25 s, 1440x2560). <a href="development/media/pull-release-0.1.1-alpha.4.mp4">Watch the full MP4 with sound</a>.</sub></p>
