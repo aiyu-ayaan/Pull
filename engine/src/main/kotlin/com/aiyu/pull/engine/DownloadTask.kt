@@ -67,6 +67,8 @@ class DownloadTask(
     private lateinit var channel: FileChannel
     private lateinit var workerScope: CoroutineScope
     private var totalSpeed = 0.0
+    /** Workers holding a segment. Guarded by [lock], so a range given back is never left without a worker. */
+    private var alive = 0
     private var lastDownloaded = -1L
 
     init {
@@ -191,17 +193,43 @@ class DownloadTask(
     }
 
     private suspend fun worker(first: Pair<Segment, Response>?) {
-        var seg = first?.first ?: nextSegment() ?: return
+        var seg = first?.first?.also { synchronized(lock) { alive++ } } ?: claim(newWorker = true) ?: return
         var initial = first?.second
-        while (true) {
-            download(seg, initial)
-            initial = null
-            seg = nextSegment() ?: return
+        var holding = true
+        try {
+            while (true) {
+                if (!download(seg, initial)) { holding = false; return }
+                initial = null
+                seg = claim(newWorker = false) ?: run { holding = false; return }
+            }
+        } finally {
+            if (holding) synchronized(lock) { alive-- }
         }
     }
 
-    /** A queued segment, or half of the biggest running one (work stealing). Null = nothing left worth a connection. */
-    private fun nextSegment(): Segment? = synchronized(lock) { queue.removeFirstOrNull() ?: steal() }
+    /**
+     * A queued segment, or half of the biggest running one (work stealing). Null = nothing left worth a connection.
+     * Counts the worker in or out of [alive] under the same lock.
+     */
+    private fun claim(newWorker: Boolean): Segment? = synchronized(lock) {
+        val s = queue.removeFirstOrNull() ?: steal()
+        if (s != null && newWorker) alive++
+        if (s == null && !newWorker) alive--
+        s
+    }
+
+    /**
+     * The server refused one more connection (many hosts cap connections per client with 403, 429 or 503). While
+     * another worker is still downloading, the range goes back to the queue and this worker stops; the others take
+     * the range when they finish theirs. The last worker never gives up this way.
+     * shortcut: the connection count never grows back during this run; a pause/resume tries the full count again.
+     */
+    private fun giveBack(seg: Segment): Boolean = synchronized(lock) {
+        if (alive <= 1) return false
+        alive--
+        queue.addFirst(seg)
+        true
+    }
 
     private fun steal(): Segment? {
         val i = info ?: return null
@@ -220,7 +248,8 @@ class DownloadTask(
         }
     }
 
-    private suspend fun download(seg: Segment, initial: Response?) {
+    /** False when the server refused this connection and the segment went back to the queue ([giveBack]). */
+    private suspend fun download(seg: Segment, initial: Response?): Boolean {
         seg.active = true
         var pending = initial
         var attempt = 0
@@ -241,10 +270,12 @@ class DownloadTask(
                         // Unknown length: the end of the stream is the end of the file.
                         seg.end.set(seg.current.get() - 1)
                         info = info?.copy(totalBytes = seg.current.get())
-                        return
+                        return true
                     }
                     if (seg.remaining > 0 && seg.current.get() == before) throw IOException("Server closed the connection")
                 } catch (e: DownloadException) {
+                    val refused = e.kind == ErrorKind.HTTP || e.kind == ErrorKind.LINK_EXPIRED
+                    if (refused && seg.current.get() == before && giveBack(seg)) return false
                     throw e
                 } catch (e: IllegalStateException) {
                     if (cancelled) throw kotlinx.coroutines.CancellationException("paused")
@@ -256,6 +287,8 @@ class DownloadTask(
                     if (seg.current.get() > before) attempt = 0
                     attempt++
                     seg.retries++
+                    // Twice busy in a row: a per-client connection cap, not a hiccup. Network errors never count here.
+                    if (e is Busy && attempt >= 2 && seg.current.get() == before && giveBack(seg)) return false
                     if (attempt > maxRetries) throw DownloadException(ErrorKind.NETWORK, e.message ?: "Network error", cause = e)
                     awaitNetwork()
                     delay(backoff(attempt))
@@ -265,6 +298,7 @@ class DownloadTask(
             pending?.close()
             seg.active = false
         }
+        return true
     }
 
     private suspend fun openSegment(seg: Segment, refreshed: Boolean = false): Response {
@@ -278,7 +312,7 @@ class DownloadTask(
             refreshLink(i.finalUrl)
             return openSegment(seg, refreshed = true)
         }
-        if (code == 429 || code >= 500) { r.close(); throw IOException("HTTP $code") }
+        if (code == 429 || code >= 500) { r.close(); throw Busy(code) }
         if (code == 200 && seg.current.get() == 0L && (!i.acceptRanges || seg.start == 0L)) {
             if (i.totalBytes >= 0 && r.body.contentLength() >= 0 && r.body.contentLength() != i.totalBytes) {
                 r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed size")
@@ -407,6 +441,9 @@ class DownloadTask(
         }
         _progress.value = Progress(info, now, totalSpeed.toLong(), segs)
     }
+
+    /** 429 or 5xx: the server is there but will not serve this request now. */
+    private class Busy(code: Int) : IOException("HTTP $code")
 
     private companion object {
         const val ALIGN = 64L * 1024

@@ -47,6 +47,11 @@ class DownloadTaskTest {
     @Volatile private var plain200ForWholeFile = false
     /** Cut this many responses off halfway, like a network switch. */
     @Volatile private var dropNext = 0
+    /** Like hosts that cap connections per client: more transfers than this at once get [refuseCode]. */
+    @Volatile private var maxConcurrent = Int.MAX_VALUE
+    /** When each throttled body we sent should finish (16 KiB per 20 ms), to count transfers in flight. */
+    private val busyUntil = mutableListOf<Long>()
+    @Volatile private var refuseCode = 503
 
     @Before fun setUp() {
         file = File.createTempFile("pull", ".bin").apply { deleteOnExit() }
@@ -62,6 +67,7 @@ class DownloadTaskTest {
                     return MockResponse.Builder().code(403).build()
                 }
                 ranges += request.headers["Range"]
+                if (maxConcurrent != Int.MAX_VALUE && !admit(request.headers["Range"])) return MockResponse.Builder().code(refuseCode).build()
                 if (failNext503 > 0) { failNext503--; return MockResponse.Builder().code(503).build() }
                 return serve(request.headers["Range"])
             }
@@ -86,6 +92,17 @@ class DownloadTaskTest {
             .addHeader("Content-Range", "bytes $start-$end/${data.size}")
             .body(Buffer().write(data, start, end - start + 1))
             .build()
+    }
+
+    private fun admit(range: String?): Boolean = synchronized(busyUntil) {
+        val now = System.currentTimeMillis()
+        busyUntil.removeAll { it <= now }
+        if (busyUntil.size >= maxConcurrent) return false
+        val m = range?.let { Regex("""bytes=(\d+)-(\d*)""").find(it) }
+        val start = m?.groupValues?.get(1)?.toLong() ?: 0
+        val end = m?.groupValues?.get(2)?.toLongOrNull() ?: (data.size - 1L)
+        busyUntil += now + (end - start + 1) / (16 * 1024) * 20
+        true
     }
 
     private fun opener(): suspend (RemoteInfo) -> FileChannel = {
@@ -225,6 +242,21 @@ class DownloadTaskTest {
     @Test fun transientServerErrorsAreRetried() = runBlocking {
         failNext503 = 3
         withContext(Dispatchers.Default) { task("/f").run() }
+        assertFileMatches()
+    }
+
+    @Test fun connectionCapWith503KeepsDownloadingOnAllowedConnections() = runBlocking {
+        throttle = true
+        maxConcurrent = 2
+        task("/f").run()
+        assertFileMatches()
+    }
+
+    @Test fun connectionCapWith403KeepsDownloadingOnAllowedConnections() = runBlocking {
+        throttle = true
+        maxConcurrent = 2
+        refuseCode = 403
+        task("/f").run()
         assertFileMatches()
     }
 
