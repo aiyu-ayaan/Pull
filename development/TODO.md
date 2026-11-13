@@ -102,8 +102,8 @@ Design docs: [docs/README.md](docs/README.md). Phases follow `docs/07-features-a
 
 ## Phase 7 — v1.x
 
-- [ ] End-game duplicate tail requests
-- [ ] Lazy-segment detection (25% of median for 6 s)
+- [x] End-game duplicate tail requests
+- [x] Lazy-segment detection (25% of median for 6 s)
 - [ ] Adaptive connection count ("Auto")
 - [ ] Multi-IP DNS spreading
 - [ ] Mirrors

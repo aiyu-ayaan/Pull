@@ -9,6 +9,7 @@ fdm_armv8.apk
 .kotlin/
 /build
 /*/build
+/*/bin
 /captures
 .externalNativeBuild
 .cxx
