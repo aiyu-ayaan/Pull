@@ -1,11 +1,14 @@
 package com.aiyu.pull.engine
 
+import kotlinx.coroutines.delay
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import java.io.IOException
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 
@@ -15,6 +18,12 @@ import java.util.concurrent.TimeUnit
  */
 fun segmentClient(maxIdle: Int = 64): OkHttpClient = OkHttpClient.Builder()
     .protocols(listOf(Protocol.HTTP_1_1))
+    .dispatcher(
+        Dispatcher().apply {
+            maxRequests = maxOf(128, maxIdle * 2)
+            maxRequestsPerHost = maxIdle
+        },
+    )
     .connectionPool(ConnectionPool(maxIdle, 5, TimeUnit.MINUTES))
     .connectTimeout(15, TimeUnit.SECONDS)
     .readTimeout(30, TimeUnit.SECONDS)
@@ -31,7 +40,7 @@ internal fun rangeRequest(url: String, headers: Map<String, String>, from: Long,
 
 /** `bytes 100-199/1000` -> (100, 199, 1000); total -1 for `*`. */
 internal fun parseContentRange(value: String?): Triple<Long, Long, Long>? {
-    val m = Regex("""bytes\s+(\d+)-(\d+)/(\d+|\*)""").find(value ?: return null) ?: return null
+    val m = Regex("""bytes\s+(\d+)-(\d+)/(\d+|\*)""", RegexOption.IGNORE_CASE).find(value ?: return null) ?: return null
     val (s, e, t) = m.destructured
     return Triple(s.toLong(), e.toLong(), t.toLongOrNull() ?: -1)
 }
@@ -72,15 +81,33 @@ internal fun String.sanitizeFileName(): String? =
 
 /**
  * A 200 does not prove the server ignores ranges: one single-byte request at a real offset does. On a valid 206 the
- * result accepts ranges and has the size, even when the 200 came without a length.
+ * result accepts ranges and has the size, even when the 200 came without a length. Retries transient 429/5xx/network
+ * blips so a brief throttle does not force a single-connection download.
  */
-internal fun RemoteInfo.verifyRanges(headers: Map<String, String>, execute: (Request) -> Response): RemoteInfo {
+internal suspend fun RemoteInfo.verifyRanges(
+    headers: Map<String, String>,
+    execute: (Request) -> Response,
+): RemoteInfo {
     val at = if (totalBytes > 1) totalBytes / 2 else 1L
-    val range = runCatching {
-        execute(rangeRequest(finalUrl, headers, at, at)).use { r -> parseContentRange(r.header("Content-Range")).takeIf { r.code == 206 } }
-    }.getOrNull() ?: return this
-    val total = range.third
-    val valid = range.first == at && total > at && (totalBytes < 0 || total == totalBytes)
+    var range: Triple<Long, Long, Long>? = null
+    for (attempt in 0..2) {
+        if (attempt > 0) delay(150L * attempt)
+        val retryable = try {
+            execute(rangeRequest(finalUrl, headers, at, at)).use { r ->
+                when {
+                    r.code == 206 -> { range = parseContentRange(r.header("Content-Range")); false }
+                    r.code == 429 || r.code >= 500 -> true
+                    else -> false
+                }
+            }
+        } catch (_: IOException) {
+            true
+        }
+        if (range != null || !retryable) break
+    }
+    val parsed = range ?: return this
+    val total = parsed.third
+    val valid = parsed.first == at && total > at && (totalBytes < 0 || total == totalBytes)
     return if (valid) copy(acceptRanges = true, totalBytes = total) else this
 }
 

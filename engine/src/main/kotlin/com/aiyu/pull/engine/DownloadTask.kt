@@ -48,6 +48,11 @@ class DownloadTask(
         val current = AtomicLong(current)
         @Volatile var active = false
         @Volatile var retries = 0
+        @Volatile var activeSinceMs = 0L
+        @Volatile var activeCall: Call? = null
+        @Volatile var racerCall: Call? = null
+        @Volatile var racing = false
+        var slowTicks = 0
         var sampledAt = current
         var speed = 0.0
         val remaining: Long
@@ -63,12 +68,16 @@ class DownloadTask(
     private val refreshLock = Mutex()
     private val liveCalls = ConcurrentHashMap.newKeySet<Call>()
     @Volatile private var cancelled = false
+    @Volatile private var workersActive = false
     @Volatile private var info: RemoteInfo? = request.resume?.info
     private lateinit var channel: FileChannel
     private lateinit var workerScope: CoroutineScope
     private var totalSpeed = 0.0
     /** Workers holding a segment. Guarded by [lock], so a range given back is never left without a worker. */
     private var alive = 0
+    private var refusalCount = 0
+    private var lastRefusalMs = 0L
+    private var refusalCooldownMs = RECOVERY_BASE_MS
     private var lastDownloaded = -1L
 
     init {
@@ -143,7 +152,7 @@ class DownloadTask(
             var i = first.remoteInfo()
             // 200: ranges unknown (many servers answer `bytes=0-` with a plain 200). One extra ranged request tells;
             // the first stream keeps going meanwhile.
-            if (first.code == 200 && (i.totalBytes < 0 || i.totalBytes > 2 * request.minSplitBytes)) {
+            if (first.code == 200 && (i.totalBytes < 0 || i.totalBytes >= 2 * request.minSplitBytes)) {
                 i = i.verifyRanges(request.headers, ::execute)
             }
             channel = openChannel(i)
@@ -171,13 +180,26 @@ class DownloadTask(
         }
     }
 
-    /** Returns when every worker is done, including the ones [upgrade] adds later. */
+    /** Returns when every worker is done, including the ones [upgrade] or recovery add later. */
     private suspend fun startWorkers(first: Pair<Segment, Response>?): Unit = coroutineScope {
         workerScope = this
-        val i = info!!
-        val workers = if (i.acceptRanges && i.totalBytes > 0) request.maxConnections.coerceAtLeast(1) else 1
-        launch { worker(first) }
-        repeat(workers - 1) { launch { worker(null) } }
+        workersActive = true
+        try {
+            val i = info!!
+            val workers = if (i.acceptRanges && i.totalBytes > 0) request.maxConnections.coerceAtLeast(1) else 1
+            if (first != null) {
+                synchronized(lock) {
+                    first.first.active = true
+                    first.first.activeSinceMs = System.currentTimeMillis()
+                    alive++
+                }
+            }
+            launch { worker(first) }
+            repeat(workers - 1) { launch { worker(null) } }
+        } finally {
+            // workersActive stays true until coroutineScope exits, which happens after all child launches finish.
+        }
+        workersActive = false
     }
 
     /** A server first seen as non-resumable just honoured an offset: keep the bytes and let the other workers in. */
@@ -193,7 +215,7 @@ class DownloadTask(
     }
 
     private suspend fun worker(first: Pair<Segment, Response>?) {
-        var seg = first?.first?.also { synchronized(lock) { alive++ } } ?: claim(newWorker = true) ?: return
+        var seg = first?.first ?: claim(newWorker = true) ?: return
         var initial = first?.second
         var holding = true
         try {
@@ -209,33 +231,52 @@ class DownloadTask(
 
     /**
      * A queued segment, or half of the biggest running one (work stealing). Null = nothing left worth a connection.
-     * Counts the worker in or out of [alive] under the same lock.
+     * Counts the worker in or out of [alive] and marks the claimed segment active under the same lock so concurrent
+     * workers can steal from it immediately on resume.
      */
     private fun claim(newWorker: Boolean): Segment? = synchronized(lock) {
         val s = queue.removeFirstOrNull() ?: steal()
-        if (s != null && newWorker) alive++
-        if (s == null && !newWorker) alive--
+        if (s != null) {
+            s.active = true
+            s.activeSinceMs = System.currentTimeMillis()
+            s.slowTicks = 0
+            if (newWorker) alive++
+        } else if (!newWorker) {
+            alive--
+        }
         s
     }
 
     /**
      * The server refused one more connection (many hosts cap connections per client with 403, 429 or 503). While
-     * another worker is still downloading, the range goes back to the queue and this worker stops; the others take
-     * the range when they finish theirs. The last worker never gives up this way.
-     * shortcut: the connection count never grows back during this run; a pause/resume tries the full count again.
+     * another worker is still downloading, the range goes back to the queue and this worker stops; adaptive recovery
+     * probes back up after [refusalCooldownMs] so transient throttles do not lock the download to 1 connection.
      */
     private fun giveBack(seg: Segment): Boolean = synchronized(lock) {
         if (alive <= 1) return false
         alive--
+        seg.active = false
+        seg.activeCall = null
         queue.addFirst(seg)
+        recordRefusal(System.currentTimeMillis())
         true
     }
 
-    private fun steal(): Segment? {
+    private fun recordRefusal(now: Long) {
+        refusalCount++
+        lastRefusalMs = now
+        refusalCooldownMs = (RECOVERY_BASE_MS shl (refusalCount - 1).coerceAtMost(4)).coerceAtMost(60_000L)
+    }
+
+    private fun inRefusalCooldown(now: Long): Boolean =
+        refusalCount > 0 && (now - lastRefusalMs) < refusalCooldownMs
+
+    private fun steal(preferred: Segment? = null): Segment? {
         val i = info ?: return null
         if (!i.acceptRanges || i.totalBytes <= 0) return null
         while (true) {
-            val victim = segments.filter { it.active }.maxByOrNull { it.remaining } ?: return null
+            val victim = preferred ?: segments.filter { it.active }.maxByOrNull { it.remaining } ?: return null
+            if (!victim.active) return null
             val cur = victim.current.get()
             val oldEnd = victim.end.get()
             val remaining = oldEnd - cur + 1
@@ -261,11 +302,13 @@ class DownloadTask(
                     val response = pending ?: openSegment(seg)
                     pending = null
                     try {
-                        stream(seg, response, buffer)
+                        stream(seg, response, buffer, before, isRacer = false)
                     } finally {
+                        seg.activeCall = null
                         // close() drains the rest for keep-alive; a concurrent pause cancel makes okio throw ISE there.
                         runCatching { response.close() }
                     }
+                    if (seg.current.get() > before) onWorkerProgress()
                     if (seg.end.get() == Long.MAX_VALUE) {
                         // Unknown length: the end of the stream is the end of the file.
                         seg.end.set(seg.current.get() - 1)
@@ -275,16 +318,28 @@ class DownloadTask(
                     if (seg.remaining > 0 && seg.current.get() == before) throw IOException("Server closed the connection")
                 } catch (e: DownloadException) {
                     val refused = e.kind == ErrorKind.HTTP || e.kind == ErrorKind.LINK_EXPIRED
-                    if (refused && seg.current.get() == before && giveBack(seg)) return false
+                    if (refused && seg.current.get() == before) {
+                        val otherAlive = synchronized(lock) { alive > 1 }
+                        if (otherAlive && attempt < 1) {
+                            attempt++
+                            seg.retries++
+                            awaitNetwork()
+                            delay(backoff(attempt))
+                            continue
+                        }
+                        if (giveBack(seg)) return false
+                    }
                     throw e
                 } catch (e: IllegalStateException) {
                     if (cancelled) throw kotlinx.coroutines.CancellationException("paused")
                     throw e
                 } catch (e: IOException) {
+                    seg.activeCall = null
                     pending?.close(); pending = null
                     currentCoroutineContext().ensureActive()
                     if (cancelled) throw kotlinx.coroutines.CancellationException("paused")
-                    if (seg.current.get() > before) attempt = 0
+                    if (seg.remaining <= 0) break
+                    if (seg.current.get() > before) { attempt = 0; onWorkerProgress() }
                     attempt++
                     seg.retries++
                     // Twice busy in a row: a per-client connection cap, not a hiccup. Network errors never count here.
@@ -296,15 +351,23 @@ class DownloadTask(
             }
         } finally {
             pending?.close()
+            seg.activeCall = null
             seg.active = false
         }
         return true
     }
 
+    private fun onWorkerProgress() = synchronized(lock) {
+        if (refusalCount > 0) {
+            refusalCount = 0
+            refusalCooldownMs = RECOVERY_BASE_MS
+        }
+    }
+
     private suspend fun openSegment(seg: Segment, refreshed: Boolean = false): Response {
         val i = info!!
         val end = seg.end.get().takeIf { it != Long.MAX_VALUE }
-        val r = execute(rangeRequest(i.finalUrl, request.headers, seg.current.get(), end))
+        val r = execute(rangeRequest(i.finalUrl, request.headers, seg.current.get(), end), seg = seg)
         val code = r.code
         if (code.isExpiredLinkCode()) {
             r.close()
@@ -358,8 +421,9 @@ class DownloadTask(
         }
     }
 
-    private fun stream(seg: Segment, response: Response, buffer: ByteBuffer) {
+    private fun stream(seg: Segment, response: Response, buffer: ByteBuffer, startPos: Long, isRacer: Boolean) {
         val source = response.body.source()
+        var streamPos = startPos
         while (true) {
             buffer.clear()
             var eof = false
@@ -369,25 +433,54 @@ class DownloadTask(
                 if (buffer.position() >= FLUSH_AT && source.buffer.size == 0L) break
             }
             buffer.flip()
-            val pos = seg.current.get()
-            val allowed = seg.remaining
-            if (allowed <= 0) return
-            if (buffer.remaining() > allowed) buffer.limit(buffer.position() + allowed.toInt())
-            var p = pos
-            try {
-                while (buffer.hasRemaining()) p += channel.write(buffer, p)
-            } catch (e: IOException) {
-                throw DownloadException(ErrorKind.DISK, e.message ?: "Write failed", cause = e)
+            val nextPos = commitBuffer(seg, streamPos, buffer)
+            if (nextPos < 0) {
+                if (isRacer) seg.activeCall?.cancel() else seg.racerCall?.cancel()
+                return
             }
-            seg.current.set(p)
-            if (eof || p > seg.end.get()) return
+            streamPos = nextPos
+            if (seg.remaining <= 0) {
+                if (isRacer) seg.activeCall?.cancel() else seg.racerCall?.cancel()
+                return
+            }
+            if (eof) return
             if (cancelled) throw IOException("Canceled")
         }
     }
 
-    private fun execute(request: Request): Response {
+    /**
+     * Writes [buffer] (representing bytes starting at [streamPos]) to disk, skipping any prefix already written
+     * by a racing worker and updating [Segment.current] atomically under [seg]'s monitor. Returns the next
+     * stream offset, or -1 when the segment has already completed.
+     */
+    private fun commitBuffer(seg: Segment, streamPos: Long, buffer: ByteBuffer): Long = synchronized(seg) {
+        val cur = seg.current.get()
+        val end = seg.end.get()
+        if (end != Long.MAX_VALUE && cur > end) return -1L
+        val avail = buffer.remaining()
+        val skip = (cur - streamPos).coerceAtLeast(0)
+        if (skip >= avail) return streamPos + avail
+        if (skip > 0) buffer.position(buffer.position() + skip.toInt())
+        val remaining = if (end == Long.MAX_VALUE) buffer.remaining().toLong() else (end - cur + 1).coerceAtLeast(0)
+        val allowed = remaining.coerceAtMost(buffer.remaining().toLong()).toInt()
+        if (allowed <= 0) return -1L
+        buffer.limit(buffer.position() + allowed)
+        var p = cur
+        try {
+            while (buffer.hasRemaining()) p += channel.write(buffer, p)
+        } catch (e: IOException) {
+            throw DownloadException(ErrorKind.DISK, e.message ?: "Write failed", cause = e)
+        }
+        seg.current.set(p)
+        return streamPos + avail
+    }
+
+    private fun execute(request: Request, seg: Segment? = null, isRacer: Boolean = false): Response {
         val call = client.newCall(request)
         liveCalls += call
+        if (seg != null) {
+            if (isRacer) seg.racerCall = call else seg.activeCall = call
+        }
         if (cancelled) call.cancel()
         try {
             return call.execute()
@@ -440,6 +533,103 @@ class DownloadTask(
             SegmentProgress(s.start, s.end.get(), cur, s.speed.toLong(), s.active, s.retries)
         }
         _progress.value = Progress(info, now, totalSpeed.toLong(), segs)
+        if (workersActive && !cancelled) checkAdaptiveAndEndGame()
+    }
+
+    private fun checkAdaptiveAndEndGame() {
+        val i = info ?: return
+        if (!i.acceptRanges || i.totalBytes <= 0) return
+        val nowMs = System.currentTimeMillis()
+        val maxConn = request.maxConnections.coerceAtLeast(1)
+
+        // 1. Adaptive recovery: if earlier 403/429/503 refusals reduced concurrency, probe back up after cooldown.
+        var launchRecovery = false
+        synchronized(lock) {
+            if (alive < maxConn && refusalCount > 0 && !inRefusalCooldown(nowMs)) {
+                val hasWork = queue.isNotEmpty() || segments.any { it.active && it.remaining >= 2 * request.minSplitBytes }
+                if (hasWork) {
+                    lastRefusalMs = nowMs
+                    launchRecovery = true
+                }
+            }
+        }
+        if (launchRecovery) workerScope.launch { worker(null) }
+
+        // 2. Lazy-segment detection: a segment slower than 25% of the median for 6 s is split or reconnected.
+        val mature = segments.filter { it.active && (nowMs - it.activeSinceMs) >= LAZY_GRACE_MS }
+        if (mature.size >= 2) {
+            val sorted = mature.map { it.speed }.sorted()
+            val median = sorted[sorted.size / 2]
+            if (median > 0.0) {
+                val threshold = median * 0.25
+                for (s in mature) {
+                    if (s.speed < threshold) s.slowTicks++ else s.slowTicks = 0
+                    if (s.slowTicks >= LAZY_TICKS) {
+                        s.slowTicks = 0
+                        var splitSeg: Segment? = null
+                        synchronized(lock) {
+                            if (alive < maxConn && !inRefusalCooldown(nowMs) && s.remaining >= 2 * request.minSplitBytes) {
+                                splitSeg = steal(s)?.also { queue.addLast(it) }
+                            }
+                        }
+                        if (splitSeg != null) {
+                            workerScope.launch { worker(null) }
+                        } else if (s.remaining > 0) {
+                            s.activeCall?.cancel()
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. End-game duplicate tail request: when < 2 s remains and a slot is free, race the slowest tail.
+        if (totalSpeed > 0.0) {
+            val rem = segments.sumOf { it.remaining }
+            if (rem in ENDGAME_MIN_BYTES..(totalSpeed * 2.0).toLong()) {
+                var victim: Segment? = null
+                synchronized(lock) {
+                    if (queue.isEmpty() && alive < maxConn && !inRefusalCooldown(nowMs)) {
+                        victim = segments
+                            .filter { it.active && !it.racing && it.remaining >= ENDGAME_MIN_BYTES }
+                            .minByOrNull { it.speed }
+                            ?.also {
+                                it.racing = true
+                                alive++
+                            }
+                    }
+                }
+                victim?.let { v -> workerScope.launch { raceEndGame(v) } }
+            }
+        }
+    }
+
+    /** Duplicate request for the tail of a slow segment in end-game; shares [Segment.current] via [commitBuffer]. */
+    private suspend fun raceEndGame(seg: Segment) {
+        val buffer = ByteBuffer.allocateDirect(bufferBytes)
+        try {
+            val i = info ?: return
+            val start = seg.current.get()
+            val end = seg.end.get()
+            if (end == Long.MAX_VALUE || start > end) return
+            val r = execute(rangeRequest(i.finalUrl, request.headers, start, end), seg = seg, isRacer = true)
+            try {
+                if (r.code == 206) {
+                    val range = parseContentRange(r.header("Content-Range"))
+                    if (range != null && range.first == start && sameEtag(i.etag, r.header("ETag"))) {
+                        stream(seg, r, buffer, start, isRacer = true)
+                    }
+                }
+            } finally {
+                seg.racerCall = null
+                runCatching { r.close() }
+            }
+        } catch (_: Throwable) {
+            // End-game racer is best-effort; the primary worker owns retries and error reporting.
+        } finally {
+            seg.racerCall = null
+            seg.racing = false
+            synchronized(lock) { alive-- }
+        }
     }
 
     /** 429 or 5xx: the server is there but will not serve this request now. */
@@ -449,5 +639,9 @@ class DownloadTask(
         const val ALIGN = 64L * 1024
         const val FLUSH_AT = 32 * 1024
         const val ALPHA = 0.3
+        const val RECOVERY_BASE_MS = 3_000L
+        const val LAZY_GRACE_MS = 2_000L
+        const val LAZY_TICKS = 24
+        const val ENDGAME_MIN_BYTES = 64L * 1024
     }
 }

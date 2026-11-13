@@ -265,4 +265,62 @@ class DownloadTaskTest {
         task("/f", connections = 32).run()
         assertFileMatches()
     }
+
+    @Test fun resumeWithSingleSegmentSplitsAcrossAllConnections() = runBlocking {
+        val initialInfo = RemoteInfo(
+            finalUrl = server.url("/f").toString(),
+            totalBytes = data.size.toLong(),
+            acceptRanges = true,
+            etag = etag,
+            lastModified = null,
+            fileName = "f",
+            mimeType = null,
+        )
+        val singleSegResume = ResumeData(initialInfo, listOf(SegmentState(0, data.size - 1L, 0)))
+        throttle = true
+        task("/f", resume = singleSegResume, connections = 8).run()
+        assertFileMatches()
+        assertTrue("expected resumed single segment to split across workers, got $ranges", ranges.size >= 8)
+    }
+
+    @Test fun transient403BurstDoesNotDropToSingleConnection() = runBlocking {
+        // First 4 non-initial requests return 403 (transient rate limit burst), then succeed.
+        var burst403 = 4
+        val delegate = server.dispatcher
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val r = request.headers["Range"]
+                if (r != null && r != "bytes=0-" && burst403 > 0) {
+                    burst403--
+                    return MockResponse.Builder().code(403).build()
+                }
+                return delegate.dispatch(request)
+            }
+        }
+        throttle = true
+        task("/f", connections = 8).run()
+        assertFileMatches()
+        assertTrue("expected multiple parallel ranges after burst 403, got ${ranges.size}", ranges.size >= 8)
+    }
+
+    @Test fun plain200RetriesTransient503DuringRangeVerify() = runBlocking {
+        plain200ForWholeFile = true
+        var failVerify = 1
+        val delegate = server.dispatcher
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val r = request.headers["Range"]
+                // verifyRanges sends a single-byte range bytes=mid-mid
+                if (r != null && Regex("""bytes=(\d+)-\1""").matches(r) && failVerify > 0) {
+                    failVerify--
+                    return MockResponse.Builder().code(503).build()
+                }
+                return delegate.dispatch(request)
+            }
+        }
+        val info = task("/f", connections = 8).run()
+        assertTrue("expected acceptRanges=true after verify retry", info.acceptRanges)
+        assertFileMatches()
+        assertTrue("expected parallel ranges after verify retry, got $ranges", ranges.size >= 8)
+    }
 }
