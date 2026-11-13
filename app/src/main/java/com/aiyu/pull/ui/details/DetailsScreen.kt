@@ -134,6 +134,7 @@ fun DetailsScreen(
     var pickFiles by rememberSaveable { mutableStateOf(false) }
     var askLimits by rememberSaveable { mutableStateOf(false) }
     var askTrackers by rememberSaveable { mutableStateOf(false) }
+    var askCreateTorrent by rememberSaveable { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(TorrentTab.STATUS) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -141,6 +142,15 @@ fun DetailsScreen(
     // Deleted from here or elsewhere: leave instead of showing an empty page.
     var seen by remember { mutableStateOf(false) }
     LaunchedEffect(e) { if (e != null) seen = true else if (seen) onBack?.invoke() }
+
+    val sendCommand: (TorrentCommand) -> Unit = { cmd ->
+        vm.torrentCommand(id, cmd)
+        if (cmd is TorrentCommand.BanPeer) {
+            scope.launch {
+                snackbar.showSnackbar(context.getString(R.string.peer_banned, com.aiyu.pull.torrent.extractPeerIp(cmd.ip)))
+            }
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection),
@@ -155,14 +165,16 @@ fun DetailsScreen(
                 actions = {
                     if (e?.kind == Kind.TORRENT) TorrentMenu(
                         sequential = live[e.id]?.torrent?.sequential ?: e.sequential,
+                        prioritizeFirstLast = live[e.id]?.torrent?.prioritizeFirstLast ?: false,
                         running = e.status == Status.RUNNING,
                         hasTorrentFile = e.torrentPath?.let { java.io.File(it).exists() } == true,
-                        onCommand = { vm.torrentCommand(id, it) },
+                        onCommand = sendCommand,
                         onLimits = { askLimits = true },
                         onAddTrackers = { askTrackers = true },
                         onSelectFiles = { pickFiles = true },
                         onShareMagnet = { com.aiyu.pull.ui.components.shareLink(context, e.url) },
                         onExportTorrent = { e.torrentPath?.let { com.aiyu.pull.ui.components.shareTorrentFile(context, it, e.fileName) } },
+                        onCreateTorrent = { askCreateTorrent = true },
                     )
                 },
                 scrollBehavior = scroll,
@@ -218,7 +230,7 @@ fun DetailsScreen(
                 torrentTab(
                     tab, view,
                     onSelectFiles = { pickFiles = true },
-                    onCommand = { vm.torrentCommand(id, it) },
+                    onCommand = sendCommand,
                     onAddTrackers = { askTrackers = true },
                     onCopy = copy,
                 )
@@ -239,6 +251,10 @@ fun DetailsScreen(
             if (segs.isNotEmpty()) item(key = "connections") { Connections(segs) }
             item(key = "info") { Info(view, onCopy = copy) }
         }
+    }
+
+    if (askCreateTorrent) {
+        CreateTorrentDialog(onDismiss = { askCreateTorrent = false })
     }
 
     if (askLimits && e != null) {

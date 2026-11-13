@@ -1,6 +1,10 @@
 package com.aiyu.pull.ui.details
 
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -19,13 +23,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.NoteAdd
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Share
@@ -44,13 +51,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,18 +77,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aiyu.pull.R
 import com.aiyu.pull.download.FilePriority
+import com.aiyu.pull.download.PeerLive
 import com.aiyu.pull.download.TorrentCommand
 import com.aiyu.pull.download.TorrentLive
+import com.aiyu.pull.torrent.TorrentCreator
+import com.aiyu.pull.torrent.extractPeerIp
 import com.aiyu.pull.ui.components.FileKind
 import com.aiyu.pull.ui.components.PieceMap
 import com.aiyu.pull.ui.components.ShapeIcon
 import com.aiyu.pull.ui.components.SpeedGraph
+import com.aiyu.pull.ui.components.shareTorrentFile
 import com.aiyu.pull.ui.components.tone
 import com.aiyu.pull.ui.downloads.DownloadView
 import com.aiyu.pull.ui.formatBytes
-import com.aiyu.pull.ui.formatDuration
 import com.aiyu.pull.ui.formatSpeed
 import com.aiyu.pull.ui.theme.Dimens
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 
 /** Tabs like other torrent clients (Flud, LibreTorrent, µTorrent): one subject per tab. */
@@ -116,7 +133,9 @@ fun LazyListScope.torrentTab(
                 if (t.pieces.isNotEmpty()) item(key = "bar") {
                     Card(stringResource(R.string.details_pieces)) { PieceMap(t.pieces, false) }
                 }
-                item(key = "transfer") { TransferCard(view, t) }
+                item(key = "transfer") { TransferCard(view, t, onCommand) }
+            } else {
+                item(key = "transfer-idle") { TorrentOptionsCard(view, onCommand) }
             }
             view.live?.let { live ->
                 item(key = "graph") {
@@ -200,14 +219,10 @@ fun LazyListScope.torrentTab(
             val list = t?.peerList.orEmpty()
             if (list.isEmpty()) item(key = "peer-empty") { Empty(if (t == null) R.string.torrent_not_running else R.string.peers_none) }
             items(list, key = { "peer" + it.ip }) { p ->
-                ListRow(
-                    title = p.ip,
-                    subtitle = listOf(
-                        p.client.ifBlank { stringResource(R.string.peer_unknown_client) },
-                        "↓ ${formatSpeed(p.down)}", "↑ ${formatSpeed(p.up)}",
-                        String.format(Locale.getDefault(), "%.1f%%", p.progress * 100),
-                    ).joinToString(" · "),
-                    progress = p.progress,
+                PeerRow(
+                    peer = p,
+                    onCopyIp = { onCopy("IP", extractPeerIp(p.ip)) },
+                    onBanPeer = { onCommand(TorrentCommand.BanPeer(p.ip)) },
                 )
             }
         }
@@ -235,8 +250,9 @@ fun LazyListScope.torrentTab(
 }
 
 @Composable
-private fun TransferCard(view: DownloadView, t: TorrentLive) {
+private fun TransferCard(view: DownloadView, t: TorrentLive, onCommand: (TorrentCommand) -> Unit) {
     val ratio = if (t.downloadedTotal > 0) t.uploaded.toDouble() / t.downloadedTotal else 0.0
+    var firstLastLocal by remember(t.prioritizeFirstLast) { mutableStateOf(t.prioritizeFirstLast) }
     val rows = listOf(
         stringResource(R.string.torrent_swarm) to stringResource(
             R.string.torrent_swarm_value, t.seeds, t.swarmSeeds.takeIf { it >= 0 }?.toString() ?: "?",
@@ -246,10 +262,109 @@ private fun TransferCard(view: DownloadView, t: TorrentLive) {
         stringResource(R.string.torrent_availability) to if (t.availability < 0) "—" else String.format(Locale.getDefault(), "%.2f", t.availability),
         stringResource(R.string.torrent_downloaded) to formatBytes(t.downloadedTotal),
         stringResource(R.string.torrent_limits) to "↓ ${limitText(t.downLimit)} · ↑ ${limitText(t.upLimit)}",
-        stringResource(R.string.torrent_sequential) to stringResource(if (t.sequential) R.string.on else R.string.off),
     )
     Card(stringResource(R.string.torrent_transfer)) {
         rows.forEach { (label, value) -> KeyValue(label, value) }
+        HorizontalDivider(Modifier.padding(vertical = Dimens.xs), color = MaterialTheme.colorScheme.outlineVariant)
+        ToggleOptionRow(
+            label = stringResource(R.string.torrent_sequential),
+            checked = t.sequential,
+            onCheckedChange = { onCommand(TorrentCommand.Sequential(it)) },
+        )
+        ToggleOptionRow(
+            label = stringResource(R.string.torrent_first_last),
+            checked = firstLastLocal,
+            onCheckedChange = {
+                firstLastLocal = it
+                onCommand(TorrentCommand.PrioritizeFirstLast(it))
+            },
+        )
+    }
+}
+
+@Composable
+private fun TorrentOptionsCard(view: DownloadView, onCommand: (TorrentCommand) -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pull_torrent_opts", android.content.Context.MODE_PRIVATE) }
+    var firstLast by rememberSaveable(view.id) { mutableStateOf(prefs.getBoolean("first_last_${view.id}", false)) }
+    Card(stringResource(R.string.torrent_transfer)) {
+        ToggleOptionRow(
+            label = stringResource(R.string.torrent_sequential),
+            checked = view.entity.sequential,
+            onCheckedChange = { onCommand(TorrentCommand.Sequential(it)) },
+        )
+        ToggleOptionRow(
+            label = stringResource(R.string.torrent_first_last),
+            checked = firstLast,
+            onCheckedChange = {
+                firstLast = it
+                onCommand(TorrentCommand.PrioritizeFirstLast(it))
+            },
+        )
+    }
+}
+
+@Composable
+private fun ToggleOptionRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) }.padding(vertical = 2.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(Dimens.sm))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun PeerRow(
+    peer: PeerLive,
+    onCopyIp: () -> Unit,
+    onBanPeer: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val subtitle = buildList {
+        add(peer.client.ifBlank { stringResource(R.string.peer_unknown_client) })
+        add("↓ ${formatSpeed(peer.down)}")
+        add("↑ ${formatSpeed(peer.up)}")
+        add(String.format(Locale.getDefault(), "%.1f%%", (peer.progress * 100f).coerceIn(0f, 100f)))
+        if (peer.source.isNotBlank()) add(peer.source)
+        if (peer.flags.isNotBlank()) add(peer.flags)
+    }.joinToString(" · ")
+
+    Column(
+        Modifier.fillMaxWidth()
+            .combinedClickable(onClick = { menu = true }, onLongClick = onCopyIp)
+            .padding(vertical = Dimens.xs),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text(peer.ip, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+            Box {
+                IconButton(onClick = { menu = true }) {
+                    Icon(Icons.Rounded.MoreVert, stringResource(R.string.cd_more))
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.peer_copy_ip)) },
+                        leadingIcon = { Icon(Icons.Rounded.ContentCopy, null) },
+                        onClick = { menu = false; onCopyIp() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.peer_ban_ip)) },
+                        leadingIcon = { Icon(Icons.Rounded.Block, null, tint = MaterialTheme.colorScheme.error) },
+                        onClick = { menu = false; onBanPeer() },
+                    )
+                }
+            }
+        }
+        LinearProgressIndicator(
+            progress = { peer.progress.coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+        )
+        HorizontalDivider(Modifier.padding(top = Dimens.sm), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -400,6 +515,7 @@ private fun limitText(bps: Int) = if (bps <= 0) "∞" else formatSpeed(bps.toLon
 @Composable
 fun TorrentMenu(
     sequential: Boolean,
+    prioritizeFirstLast: Boolean = false,
     running: Boolean,
     hasTorrentFile: Boolean,
     onCommand: (TorrentCommand) -> Unit,
@@ -408,6 +524,7 @@ fun TorrentMenu(
     onSelectFiles: () -> Unit,
     onShareMagnet: () -> Unit,
     onExportTorrent: () -> Unit,
+    onCreateTorrent: () -> Unit = {},
 ) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) { Icon(Icons.Rounded.MoreVert, stringResource(R.string.cd_more)) }
@@ -416,6 +533,11 @@ fun TorrentMenu(
             text = { Text(stringResource(R.string.torrent_sequential)) },
             leadingIcon = { Checkbox(checked = sequential, onCheckedChange = null) },
             onClick = { open = false; onCommand(TorrentCommand.Sequential(!sequential)) },
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.torrent_first_last)) },
+            leadingIcon = { Checkbox(checked = prioritizeFirstLast, onCheckedChange = null) },
+            onClick = { open = false; onCommand(TorrentCommand.PrioritizeFirstLast(!prioritizeFirstLast)) },
         )
         DropdownMenuItem(
             text = { Text(stringResource(R.string.files_title)) }, leadingIcon = { Icon(Icons.Rounded.Checklist, null) },
@@ -445,7 +567,127 @@ fun TorrentMenu(
             text = { Text(stringResource(R.string.torrent_export_file)) }, leadingIcon = { Icon(Icons.Rounded.FileDownload, null) },
             enabled = hasTorrentFile, onClick = { open = false; onExportTorrent() },
         )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.torrent_create_file)) }, leadingIcon = { Icon(Icons.Rounded.NoteAdd, null) },
+            onClick = { open = false; onCreateTorrent() },
+        )
     }
+}
+
+/** Dialog to pick a file via SAF, enter optional tracker URLs/comment, generate a `.torrent`, and share it. */
+@Composable
+fun CreateTorrentDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pickedUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var pickedName by rememberSaveable { mutableStateOf("") }
+    var pickedSize by rememberSaveable { mutableLongStateOf(-1L) }
+    var trackersText by rememberSaveable { mutableStateOf("") }
+    var commentText by rememberSaveable { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            pickedUri = uri
+            var name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+            var size = -1L
+            runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        val nameIdx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val sizeIdx = c.getColumnIndex(OpenableColumns.SIZE)
+                        if (nameIdx >= 0 && !c.isNull(nameIdx)) name = c.getString(nameIdx)
+                        if (sizeIdx >= 0 && !c.isNull(sizeIdx)) size = c.getLong(sizeIdx)
+                    }
+                }
+            }
+            pickedName = name
+            pickedSize = size
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        icon = { Icon(Icons.Rounded.NoteAdd, null) },
+        title = { Text(stringResource(R.string.torrent_create_file)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+                if (pickedUri == null) {
+                    Text(stringResource(R.string.torrent_create_no_file), style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Text(
+                        pickedName + (if (pickedSize >= 0) " (${formatBytes(pickedSize)})" else ""),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.MiddleEllipsis,
+                    )
+                }
+                FilledTonalButton(
+                    onClick = { picker.launch(arrayOf("*/*")) },
+                    enabled = !busy,
+                    shapes = ButtonDefaults.shapes(),
+                ) {
+                    Icon(Icons.Rounded.FolderOpen, null, Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.width(Dimens.sm))
+                    Text(stringResource(if (pickedUri == null) R.string.torrent_create_pick_file else R.string.torrent_create_change_file))
+                }
+                OutlinedTextField(
+                    value = trackersText,
+                    onValueChange = { trackersText = it },
+                    label = { Text(stringResource(R.string.trackers_hint)) },
+                    minLines = 2,
+                    maxLines = 5,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = commentText,
+                    onValueChange = { commentText = it },
+                    label = { Text(stringResource(R.string.torrent_create_comment)) },
+                    singleLine = true,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = pickedUri != null && !busy,
+                onClick = {
+                    val uri = pickedUri ?: return@TextButton
+                    busy = true
+                    scope.launch {
+                        val outFile = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val trackers = trackersText.lines().map(String::trim).filter(String::isNotEmpty)
+                                context.contentResolver.openInputStream(uri)?.buffered()?.use { stream ->
+                                    val bytes = TorrentCreator.create(
+                                        input = stream,
+                                        name = pickedName.ifBlank { "file" },
+                                        size = pickedSize,
+                                        trackers = trackers,
+                                        comment = commentText,
+                                    )
+                                    val torrentsDir = File(context.filesDir, "torrents")
+                                    TorrentCreator.saveToFile(torrentsDir, pickedName.ifBlank { "file" }, bytes)
+                                }
+                            }.getOrNull()
+                        }
+                        busy = false
+                        onDismiss()
+                        if (outFile != null) {
+                            shareTorrentFile(context, outFile.path, pickedName.ifBlank { "file" })
+                        }
+                    }
+                },
+            ) {
+                Text(stringResource(if (busy) R.string.torrent_creating else R.string.torrent_create_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
 }
 
 /** Per-torrent speed limits in KB/s; empty or 0 means unlimited. */

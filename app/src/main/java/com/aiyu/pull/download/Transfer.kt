@@ -28,6 +28,7 @@ data class TorrentLive(
     val availability: Float = 0f,
     val downloadedTotal: Long = 0,
     val sequential: Boolean = false,
+    val prioritizeFirstLast: Boolean = false,
     val downLimit: Int = 0,
     val upLimit: Int = 0,
     val savePath: String = "",
@@ -45,17 +46,31 @@ data class TorrentFileLive(val path: String, val size: Long, val done: Long, val
 
 data class TrackerLive(val url: String, val tier: Int, val working: Boolean, val updating: Boolean, val fails: Int, val message: String)
 
-data class PeerLive(val ip: String, val client: String, val down: Long, val up: Long, val progress: Float, val downloaded: Long, val uploaded: Long)
+data class PeerLive(
+    val ip: String,
+    val client: String,
+    val down: Long,
+    val up: Long,
+    val progress: Float,
+    val downloaded: Long,
+    val uploaded: Long,
+    val flags: String = "",
+    val source: String = "",
+)
+
+typealias TorrentPeerLive = PeerLive
 
 /** Things the user can do to a running torrent. */
 sealed interface TorrentCommand {
     data object Recheck : TorrentCommand
     data object Reannounce : TorrentCommand
     data class Sequential(val on: Boolean) : TorrentCommand
+    data class PrioritizeFirstLast(val on: Boolean) : TorrentCommand
     data class Limits(val down: Int, val up: Int) : TorrentCommand
     data class AddTrackers(val urls: List<String>) : TorrentCommand
     data class RemoveTracker(val url: String) : TorrentCommand
     data class SetFilePriority(val index: Int, val priority: FilePriority) : TorrentCommand
+    data class BanPeer(val ip: String) : TorrentCommand
 }
 
 /**

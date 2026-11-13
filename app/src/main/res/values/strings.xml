@@ -298,6 +298,17 @@
     <string name="tracker_not_contacted">Not contacted yet</string>
     <string name="peers_none">No peers connected.</string>
     <string name="peer_unknown_client">Unknown client</string>
+    <string name="peer_copy_ip">Copy IP</string>
+    <string name="peer_ban_ip">Ban peer IP</string>
+    <string name="peer_banned">Banned peer %s</string>
+    <string name="torrent_first_last">Prioritize first &amp; last pieces (preview)</string>
+    <string name="torrent_create_file">Create .torrent</string>
+    <string name="torrent_create_pick_file">Pick file</string>
+    <string name="torrent_create_change_file">Change file</string>
+    <string name="torrent_create_no_file">Choose a file on your device to package into a .torrent</string>
+    <string name="torrent_create_comment">Comment (optional)</string>
+    <string name="torrent_create_action">Create &amp; Share</string>
+    <string name="torrent_creating">Creating .torrent…</string>
     <string name="pieces_summary">%1$d of %2$d pieces · %3$s each</string>
     <string name="torrent_transfer">Transfer</string>
     <string name="torrent_swarm">Seeds / peers</string>

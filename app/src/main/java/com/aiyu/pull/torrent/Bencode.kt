@@ -1,7 +1,9 @@
 package com.aiyu.pull.torrent
 
+import java.io.ByteArrayOutputStream
+
 /**
- * Minimal bencode reader for the top level of a .torrent. libtorrent4j's add path drops BEP 19 web seeds
+ * Minimal bencode reader and writer for `.torrent` files. libtorrent4j's add path drops BEP 19 web seeds
  * (`url-list`), so Pull reads them here and adds them to the handle itself.
  */
 object Bencode {
@@ -23,6 +25,64 @@ object Bencode {
             top["creation date"] as? Long ?: 0,
         )
     }.getOrDefault(Triple("", "", 0))
+
+    /** Decodes a bencoded top-level dictionary, or null if malformed. */
+    @Suppress("UNCHECKED_CAST")
+    fun decode(bytes: ByteArray): Map<String, Any>? = runCatching {
+        Reader(bytes).read() as? Map<String, Any>
+    }.getOrNull()
+
+    /** Encodes a Bencode value (`Long`, `Int`, `String`, `ByteArray`, `List`, or `Map` with string keys). */
+    fun encode(value: Any): ByteArray {
+        val out = ByteArrayOutputStream()
+        writeTo(out, value)
+        return out.toByteArray()
+    }
+
+    private fun writeTo(out: ByteArrayOutputStream, value: Any) {
+        when (value) {
+            is Int -> writeTo(out, value.toLong())
+            is Long -> {
+                out.write('i'.code)
+                out.write(value.toString().encodeToByteArray())
+                out.write('e'.code)
+            }
+            is String -> writeTo(out, value.encodeToByteArray())
+            is ByteArray -> {
+                out.write(value.size.toString().encodeToByteArray())
+                out.write(':'.code)
+                out.write(value)
+            }
+            is List<*> -> {
+                out.write('l'.code)
+                value.forEach { item -> if (item != null) writeTo(out, item) }
+                out.write('e'.code)
+            }
+            is Map<*, *> -> {
+                out.write('d'.code)
+                val sorted = value.entries
+                    .mapNotNull { (k, v) -> if (k != null && v != null) (k.toString() to v) else null }
+                    .sortedWith { a, b -> compareUtf8(a.first, b.first) }
+                for ((k, v) in sorted) {
+                    writeTo(out, k.encodeToByteArray())
+                    writeTo(out, v)
+                }
+                out.write('e'.code)
+            }
+            else -> error("Unsupported bencode type: ${value::class.java}")
+        }
+    }
+
+    private fun compareUtf8(a: String, b: String): Int {
+        val ab = a.encodeToByteArray()
+        val bb = b.encodeToByteArray()
+        val min = minOf(ab.size, bb.size)
+        for (i in 0 until min) {
+            val cmp = (ab[i].toInt() and 0xff).compareTo(bb[i].toInt() and 0xff)
+            if (cmp != 0) return cmp
+        }
+        return ab.size.compareTo(bb.size)
+    }
 
     private class Reader(val b: ByteArray) {
         var i = 0

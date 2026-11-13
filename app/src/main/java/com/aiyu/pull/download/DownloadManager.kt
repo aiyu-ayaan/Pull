@@ -274,6 +274,8 @@ class DownloadManager @Inject constructor(
                 updated[c.index] = c.priority
                 dao.setFilePriorities(id, com.aiyu.pull.data.encodeFilePriorities(updated))
             }
+            is TorrentCommand.BanPeer -> torrents.get().banPeer(c.ip)
+            is TorrentCommand.PrioritizeFirstLast -> torrents.get().setPrioritizeFirstLast(id, c.on)
             TorrentCommand.Recheck, TorrentCommand.Reannounce -> Unit
         }
         running[id]?.transfer?.torrentCommand(c)

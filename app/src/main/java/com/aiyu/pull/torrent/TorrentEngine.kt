@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import org.libtorrent4j.AnnounceEntry
+import org.libtorrent4j.PeerInfo
 import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SessionParams
@@ -43,10 +44,14 @@ import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.TorrentHandle
 import org.libtorrent4j.TorrentInfo
 import org.libtorrent4j.TorrentStatus
+import org.libtorrent4j.swig.address
+import org.libtorrent4j.swig.error_code
+import org.libtorrent4j.swig.ip_filter
 import org.libtorrent4j.swig.settings_pack
 import org.libtorrent4j.swig.torrent_flags_t
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -69,8 +74,13 @@ class TorrentEngine @Inject constructor(
     private val lock = Any()
     @Volatile private var latest = Settings()
     val settings: Settings get() = latest
+    private val prefs by lazy { runCatching { context.getSharedPreferences("pull_torrent_opts", Context.MODE_PRIVATE) }.getOrNull() }
+    private val bannedIpSet = ConcurrentHashMap.newKeySet<String>()
+    private val firstLastMap = ConcurrentHashMap<Long, Boolean>()
+    val bannedIps: Set<String> get() = bannedIpSet.toSet()
 
     init {
+        prefs?.getStringSet("banned_ips", emptySet())?.let(bannedIpSet::addAll)
         // Settings changes apply to a running session at once; a stopped one picks them up when it starts.
         scope.launch {
             settings.settings.collect { s ->
@@ -85,6 +95,43 @@ class TorrentEngine @Inject constructor(
     fun ensureStarted() = synchronized(lock) {
         if (session.isRunning) return
         session.start(SessionParams(pack(latest)))
+        if (bannedIpSet.isNotEmpty()) applyIpFilterLocked()
+    }
+
+    fun banPeer(ipOrEndpoint: String) {
+        val cleanIp = extractPeerIp(ipOrEndpoint)
+        if (cleanIp.isBlank()) return
+        bannedIpSet.add(cleanIp)
+        prefs?.edit()?.putStringSet("banned_ips", bannedIpSet.toSet())?.apply()
+        synchronized(lock) {
+            if (session.isRunning) applyIpFilterLocked()
+        }
+    }
+
+    fun isPeerBanned(ipOrEndpoint: String): Boolean = extractPeerIp(ipOrEndpoint) in bannedIpSet
+
+    fun isPrioritizeFirstLast(id: Long): Boolean =
+        firstLastMap[id] ?: prefs?.getBoolean("first_last_$id", false) ?: false
+
+    fun setPrioritizeFirstLast(id: Long, on: Boolean) {
+        firstLastMap[id] = on
+        prefs?.edit()?.putBoolean("first_last_$id", on)?.apply()
+    }
+
+    private fun applyIpFilterLocked() {
+        runCatching {
+            val swigSession = session.swig() ?: return
+            val filter = ip_filter()
+            val blocked = ip_filter.access_flags.blocked.swigValue().toLong()
+            for (ip in bannedIpSet) {
+                val ec = error_code()
+                val addr = address.from_string(ip, ec)
+                if (!ec.failed()) {
+                    filter.add_rule(addr, addr, blocked)
+                }
+            }
+            swigSession.set_ip_filter(filter)
+        }
     }
 
     private fun pack(s: Settings) = SettingsPack().apply {
@@ -165,6 +212,7 @@ private class TorrentTransfer(
     @Volatile private var about = Triple("", "", 0L)
     @Volatile private var info: TorrentInfo? = null
     @Volatile private var url = ""
+    @Volatile private var prioritizeFirstLast = false
     /** All wanted bytes are on disk; the handle then stays in the session for [seed]. */
     @Volatile private var complete = false
 
@@ -198,6 +246,8 @@ private class TorrentTransfer(
             .forEach { h.addTracker(AnnounceEntry(it)) }
         info = ti
         url = e.url
+        prioritizeFirstLast = engine.isPrioritizeFirstLast(id)
+        if (prioritizeFirstLast) applyFirstLastPriorities(h, ti, priorities)
         h.setDownloadLimit(e.downLimit)
         h.setUploadLimit(e.upLimit)
         h.resume()
@@ -283,9 +333,22 @@ private class TorrentTransfer(
                 message = infos.firstNotNullOfOrNull { it.message().takeIf(String::isNotBlank) }.orEmpty(),
             )
         }
-        val peers = runCatching { h.peerInfo() }.getOrNull().orEmpty().map { p ->
-            PeerLive(p.ip(), p.client(), p.downSpeed().toLong(), p.upSpeed().toLong(), p.progress(), p.totalDownload(), p.totalUpload())
-        }
+        val peers = runCatching { h.peerInfo() }.getOrNull().orEmpty()
+            .filter { !engine.isPeerBanned(it.ip()) }
+            .map { p ->
+                val isWebSeed = p.connectionType() == PeerInfo.ConnectionType.WEB_SEED || p.connectionType() == PeerInfo.ConnectionType.HTTP_SEED
+                PeerLive(
+                    ip = p.ip(),
+                    client = p.client(),
+                    down = p.downSpeed().toLong(),
+                    up = p.upSpeed().toLong(),
+                    progress = p.progress(),
+                    downloaded = p.totalDownload(),
+                    uploaded = p.totalUpload(),
+                    flags = formatPeerFlags(p.flags(), isWebSeed),
+                    source = formatPeerSource(p.source().toInt()),
+                )
+            }
         _torrent.value = TorrentLive(
             state = st.state().name.lowercase(),
             peers = st.numPeers(),
@@ -306,6 +369,7 @@ private class TorrentTransfer(
             availability = st.distributedCopies(),
             downloadedTotal = st.allTimeDownload(),
             sequential = h.flags.and_(TorrentFlags.SEQUENTIAL_DOWNLOAD).non_zero(),
+            prioritizeFirstLast = prioritizeFirstLast,
             downLimit = h.downloadLimit,
             upLimit = h.uploadLimit,
             savePath = h.savePath(),
@@ -318,14 +382,14 @@ private class TorrentTransfer(
     override fun updateFiles(selected: Set<Int>) {
         val h = handle?.takeIf { it.isValid } ?: return
         val current = runCatching { h.filePriorities() }.getOrNull()
-        h.prioritizeFiles(
-            Array(count) { i ->
-                if (selected.isEmpty() || i in selected) {
-                    val cur = current?.getOrNull(i)
-                    if (cur == null || cur == Priority.IGNORE) Priority.DEFAULT else cur
-                } else Priority.IGNORE
-            },
-        )
+        val updated = Array(count) { i ->
+            if (selected.isEmpty() || i in selected) {
+                val cur = current?.getOrNull(i)
+                if (cur == null || cur == Priority.IGNORE) Priority.DEFAULT else cur
+            } else Priority.IGNORE
+        }
+        h.prioritizeFiles(updated)
+        if (prioritizeFirstLast) info?.let { ti -> applyFirstLastPriorities(h, ti, updated) }
     }
 
     override fun torrentCommand(c: TorrentCommand) {
@@ -334,6 +398,11 @@ private class TorrentTransfer(
             TorrentCommand.Recheck -> h.forceRecheck()
             TorrentCommand.Reannounce -> { h.forceReannounce(); h.forceDHTAnnounce() }
             is TorrentCommand.Sequential -> if (c.on) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            is TorrentCommand.PrioritizeFirstLast -> {
+                prioritizeFirstLast = c.on
+                engine.setPrioritizeFirstLast(id, c.on)
+                info?.let { ti -> applyFirstLastPriorities(h, ti, runCatching { h.filePriorities() }.getOrNull()) }
+            }
             is TorrentCommand.Limits -> { h.setDownloadLimit(c.down); h.setUploadLimit(c.up) }
             is TorrentCommand.AddTrackers -> c.urls.forEach { h.addTracker(AnnounceEntry(it)) }
             is TorrentCommand.RemoveTracker -> h.replaceTrackers(h.trackers().filter { it.url() != c.url })
@@ -342,7 +411,30 @@ private class TorrentTransfer(
                 if (c.index < current.size) {
                     current[c.index] = c.priority.toLibtorrent()
                     h.prioritizeFiles(current)
+                    if (prioritizeFirstLast) info?.let { ti -> applyFirstLastPriorities(h, ti, current) }
                 }
+            }
+            is TorrentCommand.BanPeer -> engine.banPeer(c.ip)
+        }
+    }
+
+    private fun applyFirstLastPriorities(h: TorrentHandle, ti: TorrentInfo, filePriorities: Array<Priority>?) {
+        runCatching {
+            val fs = ti.files()
+            if (!prioritizeFirstLast) {
+                if (ti.numPieces() > 0) {
+                    h.prioritizePieces(Array(ti.numPieces()) { Priority.DEFAULT })
+                }
+                filePriorities?.let(h::prioritizeFiles)
+                return
+            }
+            val fileRanges = (0 until ti.numFiles()).map { i ->
+                val wanted = !fs.padFileAt(i) && (filePriorities?.getOrNull(i) ?: Priority.DEFAULT) != Priority.IGNORE
+                Triple(fs.fileOffset(i), fs.fileSize(i), wanted)
+            }
+            val topPieces = firstAndLastPieces(ti.numPieces(), ti.pieceLength(), fileRanges)
+            for (piece in topPieces) {
+                h.piecePriority(piece, Priority.TOP_PRIORITY)
             }
         }
     }
@@ -371,4 +463,65 @@ private fun Priority.toFilePriority(): FilePriority = when (this) {
     Priority.TWO, Priority.LOW -> FilePriority.LOW
     Priority.SIX, Priority.TOP_PRIORITY -> FilePriority.HIGH
     else -> FilePriority.NORMAL
+}
+
+/** Strips port / brackets from a peer endpoint (`"1.2.3.4:6881"` -> `"1.2.3.4"`, `"[::1]:6881"` -> `"::1"`). */
+internal fun extractPeerIp(ipOrEndpoint: String): String {
+    val trimmed = ipOrEndpoint.trim()
+    if (trimmed.isEmpty()) return ""
+    if (trimmed.startsWith("[") && trimmed.contains("]")) {
+        return trimmed.substringAfter('[').substringBefore(']')
+    }
+    val firstColon = trimmed.indexOf(':')
+    val lastColon = trimmed.lastIndexOf(':')
+    return if (firstColon > 0 && firstColon == lastColon) trimmed.substring(0, firstColon) else trimmed
+}
+
+/** Formats libtorrent `peer_info::flags` bitmask into standard BitTorrent flag characters. */
+internal fun formatPeerFlags(flags: Int, isWebSeed: Boolean = false): String = buildString {
+    if (isWebSeed) append('W')
+    if ((flags and 0x01) != 0) append(if ((flags and 0x02) == 0) 'D' else 'd')
+    if ((flags and 0x04) != 0) append(if ((flags and 0x08) == 0) 'U' else 'u')
+    if ((flags and 0x400) != 0) append('S')
+    if ((flags and 0x20000) != 0) append('P')
+    if ((flags and 0x340000) != 0) append('E')
+    append(if ((flags and 0x20) == 0) 'I' else 'O')
+}
+
+/** Formats libtorrent `peer_info::source` bitmask into human-readable discovery sources. */
+internal fun formatPeerSource(source: Int): String = buildList {
+    if ((source and 0x01) != 0) add("Tracker")
+    if ((source and 0x02) != 0) add("DHT")
+    if ((source and 0x04) != 0) add("PEX")
+    if ((source and 0x08) != 0) add("LSD")
+    if ((source and 0x10) != 0) add("Resume")
+    if ((source and 0x20) != 0) add("Incoming")
+}.joinToString("/")
+
+/**
+ * Computes piece indices in the first ~1% (at least 1 piece) and last ~1% (at least 1 piece)
+ * of each wanted file's piece range `[fileOffset, fileOffset + fileSize)`.
+ */
+internal fun firstAndLastPieces(
+    numPieces: Int,
+    pieceLength: Int,
+    files: List<Triple<Long, Long, Boolean>>,
+): Set<Int> {
+    if (numPieces <= 0 || pieceLength <= 0) return emptySet()
+    val pl = pieceLength.toLong()
+    val out = LinkedHashSet<Int>()
+    for ((offset, size, wanted) in files) {
+        if (!wanted || size <= 0L) continue
+        val firstPiece = (offset / pl).toInt().coerceIn(0, numPieces - 1)
+        val lastPiece = ((offset + size - 1) / pl).toInt().coerceIn(firstPiece, numPieces - 1)
+        val span = lastPiece - firstPiece + 1
+        val edge = (span / 100).coerceAtLeast(1)
+        for (p in firstPiece until (firstPiece + edge).coerceAtMost(lastPiece + 1)) {
+            out.add(p)
+        }
+        for (p in (lastPiece - edge + 1).coerceAtLeast(firstPiece)..lastPiece) {
+            out.add(p)
+        }
+    }
+    return out
 }
