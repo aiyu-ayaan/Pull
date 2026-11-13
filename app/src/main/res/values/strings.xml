@@ -376,6 +376,8 @@
     <string name="opt_thumbnail_hint">Embed the thumbnail as cover art.</string>
     <string name="opt_metadata">Metadata</string>
     <string name="opt_metadata_hint">Embed title, artist, date and description.</string>
+    <string name="opt_video_multi_connection">Multi-connection video</string>
+    <string name="opt_video_multi_connection_hint">Download each video file over several connections with aria2c. Turn off if a site rejects it.</string>
     <string name="opt_sponsorblock">SponsorBlock</string>
     <string name="opt_sponsorblock_hint">Cut sponsor segments out of YouTube videos.</string>
     <string name="video_type">Download type</string>

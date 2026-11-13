@@ -232,6 +232,9 @@ private fun LazyListScope.video(s: Settings, vm: SettingsViewModel) {
                 options = listOf(AudioFormat.BEST to R.string.audio_best, AudioFormat.M4A to R.string.audio_m4a, AudioFormat.MP3 to R.string.audio_mp3, AudioFormat.OPUS to R.string.audio_opus),
                 selected = v.audio,
             ) { f -> vm.update { setAudioFormat(f) } }
+            SwitchItem(R.string.opt_video_multi_connection, R.string.opt_video_multi_connection_hint, s.videoMultiConnection) { on ->
+                vm.update { setVideoMultiConnection(on) }
+            }
         }
     }
     item {

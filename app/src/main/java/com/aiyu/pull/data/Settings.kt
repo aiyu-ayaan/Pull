@@ -46,6 +46,8 @@ data class Settings(
     val torrentConnections: Int = 200,
     /** Defaults for new video downloads; the sheet can change them per download. */
     val video: VideoChoice = VideoChoice(),
+    /** Video files through aria2c with several connections, and HLS/DASH fragments in parallel. */
+    val videoMultiConnection: Boolean = true,
     /** Self-update from GitHub releases: launch + daily check. */
     val updatesEnabled: Boolean = true,
     /** Null = the channel this build came from (UpdateChannel.forVersion). */
@@ -98,6 +100,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val videoThumbnail = booleanPreferencesKey("video_thumbnail")
         val videoMetadata = booleanPreferencesKey("video_metadata")
         val sponsorBlock = booleanPreferencesKey("sponsor_block")
+        val videoMultiConnection = booleanPreferencesKey("video_multi_connection")
         val updatesEnabled = booleanPreferencesKey("updates_enabled")
         val updateChannel = stringPreferencesKey("update_channel")
         val updateLastChecked = longPreferencesKey("update_last_checked")
@@ -137,6 +140,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
                 metadata = p[Keys.videoMetadata] ?: true,
                 sponsorBlock = p[Keys.sponsorBlock] ?: false,
             ),
+            videoMultiConnection = p[Keys.videoMultiConnection] ?: true,
             updatesEnabled = p[Keys.updatesEnabled] ?: true,
             updateChannel = p[Keys.updateChannel]?.let { runCatching { UpdateChannel.valueOf(it) }.getOrNull() },
             updateLastChecked = p[Keys.updateLastChecked] ?: 0,
@@ -182,6 +186,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setVideoThumbnail(on: Boolean) = set(Keys.videoThumbnail, on)
     suspend fun setVideoMetadata(on: Boolean) = set(Keys.videoMetadata, on)
     suspend fun setSponsorBlock(on: Boolean) = set(Keys.sponsorBlock, on)
+    suspend fun setVideoMultiConnection(on: Boolean) = set(Keys.videoMultiConnection, on)
     suspend fun setUpdatesEnabled(on: Boolean) = set(Keys.updatesEnabled, on)
     suspend fun setUpdateChannel(c: UpdateChannel) = set(Keys.updateChannel, c.name)
     suspend fun setUpdateLastChecked(at: Long) = set(Keys.updateLastChecked, at)

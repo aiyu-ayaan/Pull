@@ -167,6 +167,27 @@ class VideoEngine @Inject constructor(
 
     fun defaultSaveDir(): File = torrents.defaultSaveDir()
 
+    /** CA certificates that ship with youtubedl-android's Python runtime. */
+    private val caBundle get() = File(context.noBackupFilesDir, "youtubedl-android/packages/python/usr/etc/tls/cert.pem")
+
+    /**
+     * Without these yt-dlp fetches a video over one connection, which sites like YouTube throttle per connection.
+     * Plain files go through aria2c (bundled as libaria2c.so, which yt-dlp matches by name); HLS/DASH fragments
+     * download in parallel. aria2c caps connections per server at 16.
+     */
+    suspend fun connectionOptions(): List<Pair<String, String>> {
+        val s = settings.current()
+        if (!s.videoMultiConnection) return emptyList()
+        // The bundled aria2c has no CA store of its own and fails every TLS handshake without one.
+        if (!caBundle.exists()) return listOf("--concurrent-fragments" to "${s.connections.coerceIn(1, 16)}")
+        val n = s.connections.coerceIn(1, 16)
+        return listOf(
+            "--concurrent-fragments" to "$n",
+            "--downloader" to "http:libaria2c.so",
+            "--downloader-args" to "aria2c:-x $n -s $n -k 1M --summary-interval=1 --ca-certificate=${caBundle.path}",
+        )
+    }
+
     fun transfer(e: DownloadEntity): Transfer = VideoTransfer(e, this, dao, context)
 
     companion object {
@@ -202,6 +223,8 @@ private class VideoTransfer(
     override suspend fun run(): Long {
         engine.ensureReady()
         val dir = File(e.saveDir ?: engine.defaultSaveDir().path).apply { mkdirs() }
+        // yt-dlp writes the final path here; picking "the newest tagged file" chose a subtitle or thumbnail sidecar.
+        val pathFile = File(context.cacheDir, "ytdlp-${e.id}.path").apply { delete() }
         val request = YoutubeDLRequest(e.url).apply {
             addOption("-f", e.videoFormat ?: VideoEngine.BEST)
             // The tag finds the finished file again; continue + part files make pause/resume and process death safe.
@@ -210,6 +233,8 @@ private class VideoTransfer(
             addOption("--no-mtime")
             addOption("--merge-output-format", "mp4/mkv")
             addOption("--newline")
+            addCommands(listOf("--print-to-file", "after_move:filepath", pathFile.path))
+            engine.connectionOptions().forEach { (k, v) -> addOption(k, v) }
             e.headers["User-Agent"]?.let { addOption("--user-agent", it) }
             e.headers["Referer"]?.let { addOption("--referer", it) }
             val cookie = e.headers["Cookie"] ?: runCatching { CookieManager.getInstance().getCookie(e.url) }.getOrNull()
@@ -230,8 +255,13 @@ private class VideoTransfer(
             throw DownloadException(ErrorKind.HTTP, msg.substringAfter("ERROR: ").take(300), cause = t)
         }
         if (response.exitCode != 0) throw DownloadException(ErrorKind.HTTP, response.err.lines().lastOrNull { it.isNotBlank() } ?: "yt-dlp failed")
-        val out = dir.listFiles { f -> f.name.contains(tag) && !f.name.endsWith(".part") && !f.name.endsWith(".ytdl") }
-            ?.maxByOrNull { it.lastModified() } ?: throw IOException("yt-dlp finished but the file is missing")
+        val tagged = dir.listFiles { f -> f.name.contains(tag) && !f.name.endsWith(".part") && !f.name.endsWith(".ytdl") }.orEmpty()
+        val printed = runCatching { pathFile.readLines().lastOrNull { it.isNotBlank() }?.let(::File) }.getOrNull()
+        pathFile.delete()
+        val out = printed?.takeIf { it.isFile } ?: tagged.maxByOrNull { it.length() }
+            ?: throw IOException("yt-dlp finished but the file is missing")
+        // Sidecars yt-dlp left (subtitles it could not embed, thumbnails) lose the tag too.
+        tagged.filter { it != out }.forEach { f -> f.renameTo(com.aiyu.pull.download.uniqueFile(dir, f.name.replace(" $tag", ""))) }
         val clean = com.aiyu.pull.download.uniqueFile(dir, out.name.replace(" $tag", "")).let { if (out.renameTo(it)) it else out }
         dao.setFile(e.id, Uri.fromFile(clean).toString(), clean.name, null)
         val size = clean.length()
