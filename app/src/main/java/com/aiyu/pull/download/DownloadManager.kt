@@ -11,6 +11,7 @@ import com.aiyu.pull.data.Kind
 import com.aiyu.pull.data.SettingsRepository
 import com.aiyu.pull.data.Status
 import com.aiyu.pull.data.encodeSegments
+import com.aiyu.pull.data.isWithinSchedule
 import com.aiyu.pull.engine.DownloadException
 import com.aiyu.pull.engine.DownloadRequest
 import com.aiyu.pull.engine.DownloadTask
@@ -105,6 +106,7 @@ class DownloadManager @Inject constructor(
 
     init {
         scope.launch { sampleLive() }
+        scope.launch { observeSchedule() }
     }
 
     /** Called once per process. Rows still RUNNING were cut off by a process death, reboot or crash. */
@@ -127,7 +129,12 @@ class DownloadManager @Inject constructor(
         pageUrl: String? = null,
         connections: Int? = null,
         start: Boolean = true,
+        mirrors: String = "",
+        checksum: String = "",
     ): Long {
+        val normalizedMirrors = mirrors.lines().map(String::trim).filter {
+            it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
+        }.distinct().joinToString("\n")
         val entity = DownloadEntity(
             url = url,
             pageUrl = pageUrl,
@@ -135,10 +142,44 @@ class DownloadManager @Inject constructor(
             fileName = fileName?.trim()?.takeIf { it.isNotEmpty() } ?: nameFromUrl(url),
             maxConnections = connections ?: settings.current().connections,
             status = if (start) Status.QUEUED else Status.PAUSED,
+            mirrors = normalizedMirrors,
+            checksum = checksum.trim(),
         )
         val id = dao.insert(entity)
         if (start) schedule()
         return id
+    }
+
+    suspend fun addBatch(
+        urls: List<String>,
+        headers: Map<String, String> = emptyMap(),
+        pageUrl: String? = null,
+        connections: Int? = null,
+        start: Boolean = true,
+        mirrors: String = "",
+        checksum: String = "",
+    ): Long {
+        var lastId = -1L
+        val maxConn = connections ?: settings.current().connections
+        val normalizedMirrors = mirrors.lines().map(String::trim).filter {
+            it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
+        }.distinct().joinToString("\n")
+        val cleanChecksum = checksum.trim()
+        for (u in urls) {
+            val entity = DownloadEntity(
+                url = u,
+                pageUrl = pageUrl,
+                headersJson = DownloadEntity.encodeHeaders(headers),
+                fileName = nameFromUrl(u),
+                maxConnections = maxConn,
+                status = if (start) Status.QUEUED else Status.PAUSED,
+                mirrors = normalizedMirrors,
+                checksum = cleanChecksum,
+            )
+            lastId = dao.insert(entity)
+        }
+        if (start && lastId != -1L) schedule()
+        return lastId
     }
 
     /** Torrent from a .torrent file ([meta] set) or a magnet whose metadata arrives later ([meta] null). */
@@ -319,7 +360,15 @@ class DownloadManager @Inject constructor(
     private fun schedule() {
         scope.launch {
             scheduleLock.withLock {
-                val max = settings.current().maxDownloads
+                val s = settings.current()
+                if (s.scheduleEnabled && !isWithinSchedule(currentHour(), s.scheduleStartHour, s.scheduleEndHour)) {
+                    running.values.filter { !it.seeding }.forEach {
+                        it.stopAs = Status.QUEUED
+                        it.job.cancel()
+                    }
+                    return@withLock
+                }
+                val max = s.maxDownloads
                 for (e in dao.withStatus(Status.QUEUED)) {
                     if (running.values.count { !it.seeding } >= max) break
                     if (!running.containsKey(e.id)) start(e)
@@ -328,6 +377,23 @@ class DownloadManager @Inject constructor(
             if (running.isNotEmpty()) startService()
         }
     }
+
+    private suspend fun observeSchedule() {
+        // React immediately to schedule setting changes, and re-evaluate every minute while scheduleEnabled is on.
+        scope.launch {
+            settings.settings.collect {
+                schedule()
+            }
+        }
+        while (true) {
+            delay(60_000)
+            if (settings.current().scheduleEnabled) {
+                schedule()
+            }
+        }
+    }
+
+    private fun currentHour(): Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
 
     private suspend fun start(e: DownloadEntity) {
         dao.setStatus(e.id, Status.RUNNING)
@@ -338,7 +404,14 @@ class DownloadManager @Inject constructor(
                 e.id,
                 DownloadTask(
                     client = client,
-                    request = DownloadRequest(e.url, e.headers, e.maxConnections, resume = e.resumeData()),
+                    request = DownloadRequest(
+                        url = e.url,
+                        headers = e.headers,
+                        maxConnections = e.maxConnections,
+                        resume = e.resumeData(),
+                        mirrors = e.mirrors.lines().map(String::trim).filter(String::isNotEmpty),
+                        expectedChecksum = e.checksum.trim().ifEmpty { null },
+                    ),
                     openFile = { info -> openFile(e.id, info) },
                     awaitNetwork = network::awaitConnected,
                 ),
@@ -446,6 +519,9 @@ class DownloadManager @Inject constructor(
 
     companion object {
         private const val TAG = "DownloadManager"
+
+        fun isWithinSchedule(hour: Int, startHour: Int, endHour: Int): Boolean =
+            com.aiyu.pull.data.isWithinSchedule(hour, startHour, endHour)
 
         fun nameFromUrl(url: String): String =
             url.substringBefore('?').substringBefore('#').trimEnd('/').substringAfterLast('/')

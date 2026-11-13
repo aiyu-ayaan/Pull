@@ -40,6 +40,9 @@ data class Settings(
     val maxDownloads: Int = 3,
     /** Downloads cut by a crash, reboot or the system killing Pull continue on their own. */
     val autoResume: Boolean = true,
+    val scheduleEnabled: Boolean = false,
+    val scheduleStartHour: Int = 0,
+    val scheduleEndHour: Int = 6,
     val torrentSequential: Boolean = false,
     val ytdlpChannel: String = "STABLE",
     val ytdlpAutoUpdate: Boolean = true,
@@ -76,6 +79,21 @@ data class Settings(
     val browserInterceptByExtension: Boolean = true,
 )
 
+/**
+ * Whether [hour] (0..23) falls inside the scheduled download window `[startHour, endHour)`.
+ * Supports overnight wrap-around (e.g. 22 to 6) and 24h windows (`startHour == endHour`).
+ */
+fun isWithinSchedule(hour: Int, startHour: Int, endHour: Int): Boolean {
+    val h = ((hour % 24) + 24) % 24
+    val start = ((startHour % 24) + 24) % 24
+    val end = ((endHour % 24) + 24) % 24
+    return when {
+        start == end -> true
+        start < end -> h in start until end
+        else -> h >= start || h < end
+    }
+}
+
 /** BitTorrent protocol encryption: allow both, require it, or never use it. */
 enum class Encryption { ENABLED, FORCED, DISABLED }
 
@@ -95,6 +113,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val connections = intPreferencesKey("connections")
         val maxDownloads = intPreferencesKey("max_downloads")
         val autoResume = booleanPreferencesKey("auto_resume")
+        val scheduleEnabled = booleanPreferencesKey("schedule_enabled")
+        val scheduleStartHour = intPreferencesKey("schedule_start_hour")
+        val scheduleEndHour = intPreferencesKey("schedule_end_hour")
         val torrentSequential = booleanPreferencesKey("torrent_sequential")
         val ytdlpChannel = stringPreferencesKey("ytdlp_channel")
         val ytdlpAutoUpdate = booleanPreferencesKey("ytdlp_auto_update")
@@ -139,6 +160,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             connections = p[Keys.connections] ?: 8,
             maxDownloads = p[Keys.maxDownloads] ?: 3,
             autoResume = p[Keys.autoResume] ?: true,
+            scheduleEnabled = p[Keys.scheduleEnabled] ?: false,
+            scheduleStartHour = (p[Keys.scheduleStartHour] ?: 0).coerceIn(0, 23),
+            scheduleEndHour = (p[Keys.scheduleEndHour] ?: 6).coerceIn(0, 23),
             torrentSequential = p[Keys.torrentSequential] ?: false,
             ytdlpChannel = p[Keys.ytdlpChannel] ?: "STABLE",
             ytdlpAutoUpdate = p[Keys.ytdlpAutoUpdate] ?: true,
@@ -193,6 +217,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setConnections(n: Int) = set(Keys.connections, n.coerceIn(1, 32))
     suspend fun setMaxDownloads(n: Int) = set(Keys.maxDownloads, n.coerceIn(1, 10))
     suspend fun setAutoResume(on: Boolean) = set(Keys.autoResume, on)
+    suspend fun setScheduleEnabled(on: Boolean) = set(Keys.scheduleEnabled, on)
+    suspend fun setScheduleStartHour(hour: Int) = set(Keys.scheduleStartHour, hour.coerceIn(0, 23))
+    suspend fun setScheduleEndHour(hour: Int) = set(Keys.scheduleEndHour, hour.coerceIn(0, 23))
     suspend fun setTorrentSequential(on: Boolean) = set(Keys.torrentSequential, on)
     suspend fun setYtdlpChannel(channel: String) = set(Keys.ytdlpChannel, channel)
     suspend fun setYtdlpAutoUpdate(on: Boolean) = set(Keys.ytdlpAutoUpdate, on)
@@ -227,6 +254,50 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setBrowserCosmetic(on: Boolean) = set(Keys.browserCosmetic, on)
     suspend fun setBrowserSearchEngine(engine: SearchEngine) = set(Keys.browserSearchEngine, engine.name)
     suspend fun setBrowserInterceptByExtension(on: Boolean) = set(Keys.browserInterceptByExtension, on)
+
+    suspend fun restore(s: Settings) {
+        context.store.edit { p ->
+            p[Keys.theme] = s.themeMode.name
+            p[Keys.dynamic] = s.dynamicColor
+            p[Keys.connections] = s.connections.coerceIn(1, 32)
+            p[Keys.maxDownloads] = s.maxDownloads.coerceIn(1, 10)
+            p[Keys.autoResume] = s.autoResume
+            p[Keys.scheduleEnabled] = s.scheduleEnabled
+            p[Keys.scheduleStartHour] = s.scheduleStartHour.coerceIn(0, 23)
+            p[Keys.scheduleEndHour] = s.scheduleEndHour.coerceIn(0, 23)
+            p[Keys.torrentSequential] = s.torrentSequential
+            p[Keys.ytdlpChannel] = s.ytdlpChannel
+            p[Keys.ytdlpAutoUpdate] = s.ytdlpAutoUpdate
+            p[Keys.torrentDht] = s.torrentDht
+            p[Keys.torrentLsd] = s.torrentLsd
+            p[Keys.torrentUtp] = s.torrentUtp
+            p[Keys.torrentPortMapping] = s.torrentPortMapping
+            p[Keys.torrentEncryption] = s.torrentEncryption.name
+            p[Keys.torrentDownLimit] = s.torrentDownLimit.coerceAtLeast(0)
+            p[Keys.torrentUpLimit] = s.torrentUpLimit.coerceAtLeast(0)
+            p[Keys.torrentConnections] = s.torrentConnections.coerceIn(20, 500)
+            p[Keys.torrentSeed] = s.torrentSeed
+            p[Keys.torrentSeedRatio] = s.torrentSeedRatio.coerceAtLeast(0)
+            p[Keys.torrentDefaultTrackers] = s.torrentDefaultTrackers
+            p[Keys.videoMaxRes] = s.video.maxRes.coerceAtLeast(0)
+            p[Keys.videoCodec] = s.video.codec.name
+            p[Keys.videoContainer] = s.video.container.name
+            p[Keys.audioFormat] = s.video.audio.name
+            p[Keys.videoSubtitles] = s.video.subtitles
+            p[Keys.subtitleLangs] = s.video.subtitleLangs
+            p[Keys.videoThumbnail] = s.video.thumbnail
+            p[Keys.videoMetadata] = s.video.metadata
+            p[Keys.sponsorBlock] = s.video.sponsorBlock
+            p[Keys.videoMultiConnection] = s.videoMultiConnection
+            p[Keys.updatesEnabled] = s.updatesEnabled
+            s.updateChannel?.let { p[Keys.updateChannel] = it.name } ?: p.remove(Keys.updateChannel)
+            p[Keys.browserAdBlock] = s.browserAdBlock
+            p[Keys.browserPopupBlock] = s.browserPopupBlock
+            p[Keys.browserCosmetic] = s.browserCosmetic
+            p[Keys.browserSearchEngine] = s.browserSearchEngine.name
+            p[Keys.browserInterceptByExtension] = s.browserInterceptByExtension
+        }
+    }
 
     companion object {
         /** Starter templates; the user edits or deletes them on the Command templates screen. */

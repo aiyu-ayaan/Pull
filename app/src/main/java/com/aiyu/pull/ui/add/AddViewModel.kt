@@ -115,8 +115,28 @@ class AddViewModel @Inject constructor(
         return Analysis.Torrent(bytes?.let { torrents.get().parse(it) }, uri, fetching = false)
     }
 
-    suspend fun addFile(url: String, name: String?, pageUrl: String?, headers: Map<String, String>, connections: Int, start: Boolean): Long =
-        manager.add(url, name, headers, pageUrl, connections.coerceIn(1, 32), start).also { reset() }
+    suspend fun addFile(
+        url: String,
+        name: String?,
+        pageUrl: String?,
+        headers: Map<String, String>,
+        connections: Int,
+        start: Boolean,
+        mirrors: String = "",
+        checksum: String = "",
+    ): Long =
+        manager.add(url, name, headers, pageUrl, connections.coerceIn(1, 32), start, mirrors, checksum).also { reset() }
+
+    suspend fun addBatch(
+        urls: List<String>,
+        pageUrl: String?,
+        headers: Map<String, String>,
+        connections: Int,
+        start: Boolean,
+        mirrors: String = "",
+        checksum: String = "",
+    ): Long =
+        manager.addBatch(urls, headers, pageUrl, connections.coerceIn(1, 32), start, mirrors, checksum).also { reset() }
 
     suspend fun addTorrent(meta: TorrentMeta?, magnet: String?, selected: Set<Int>, sequential: Boolean, start: Boolean): Long =
         manager.addTorrent(meta, magnet, selected, sequential, start).also { reset() }

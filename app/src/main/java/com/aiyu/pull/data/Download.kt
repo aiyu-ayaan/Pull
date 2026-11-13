@@ -70,6 +70,10 @@ data class DownloadEntity(
     @ColumnInfo(defaultValue = "") val extraTrackers: String = "",
     /** Torrent: per-file priority overrides as `index:PRIORITY,...` (e.g. `0:HIGH,2:SKIP`). */
     @ColumnInfo(defaultValue = "") val filePriorities: String = "",
+    /** HTTP: fallback mirror URLs, one per line. */
+    @ColumnInfo(defaultValue = "") val mirrors: String = "",
+    /** HTTP: expected MD5 or SHA-256 checksum hex string. */
+    @ColumnInfo(defaultValue = "") val checksum: String = "",
 ) {
     val headers: Map<String, String> get() = runCatching { Json.decodeFromString<Map<String, String>>(headersJson) }.getOrDefault(emptyMap())
 
@@ -192,13 +196,14 @@ interface DownloadDao {
 
 @Database(
     entities = [DownloadEntity::class, HistoryEntity::class, BookmarkEntity::class, ShortcutEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
+        AutoMigration(from = 5, to = 6),
     ],
 )
 abstract class PullDatabase : RoomDatabase() {

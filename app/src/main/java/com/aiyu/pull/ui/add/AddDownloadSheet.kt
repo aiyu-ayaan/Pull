@@ -30,10 +30,13 @@ import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -118,11 +121,33 @@ fun AddDownloadSheet(
     val context = LocalContext.current
     // Saveable: a process death while the sheet is open brings the same input back.
     var url by rememberSaveable { mutableStateOf(request.url) }
+    var mirrors by rememberSaveable { mutableStateOf("") }
+    var checksum by rememberSaveable { mutableStateOf("") }
+    var advancedExpanded by rememberSaveable { mutableStateOf(false) }
+    val batchUrls = remember(url) { expandUrlPattern(url) }
+    val isBatch = request.torrentFile == null && batchUrls.size > 1
     val state by vm.state.collectAsStateWithLifecycle()
 
-    LaunchedEffect(url, request.torrentFile) {
+    val importTxt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()
+            val parsed = parseUrlListText(text.orEmpty())
+            if (parsed.isNotEmpty()) {
+                url = parsed.joinToString("\n")
+            }
+        }
+    }
+
+    LaunchedEffect(url, request.torrentFile, isBatch) {
+        if (isBatch) {
+            vm.reset()
+            return@LaunchedEffect
+        }
         if (request.torrentFile == null) delay(400) // typing debounce
-        vm.analyze(url.trim(), request.headers, request.torrentFile)
+        val targetUrl = batchUrls.singleOrNull() ?: url.trim()
+        vm.analyze(targetUrl, request.headers, request.torrentFile)
     }
 
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -163,23 +188,70 @@ fun AddDownloadSheet(
                     value = url,
                     onValueChange = { url = it },
                     label = { Text(stringResource(R.string.add_url_any)) },
-                    placeholder = { Text("https://  ·  magnet:?") },
-                    singleLine = true,
+                    placeholder = { Text("https://  ·  part[01-05].zip  ·  magnet:?") },
+                    minLines = 1,
+                    maxLines = 4,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
-                    isError = state is Analysis.Failed,
+                    isError = !isBatch && state is Analysis.Failed,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    FilledTonalButton(
+                        onClick = { importTxt.launch(arrayOf("text/plain")) },
+                        shapes = ButtonDefaults.shapes(),
+                    ) {
+                        Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(Dimens.sm))
+                        Text("Import .txt URL list")
+                    }
+                    if (isBatch) {
+                        Surface(
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Text(
+                                text = "Batch: ${batchUrls.size} URLs",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = Dimens.md, vertical = Dimens.sm),
+                            )
+                        }
+                    }
+                }
+                AdvancedOptionsSection(
+                    expanded = advancedExpanded,
+                    onToggle = { advancedExpanded = !advancedExpanded },
+                    mirrors = mirrors,
+                    onMirrorsChange = { mirrors = it },
+                    checksum = checksum,
+                    onChecksumChange = { checksum = it },
+                )
             }
-            AnimatedContent(state, contentKey = { it::class }, label = "analysis") { s ->
-                Column(verticalArrangement = Arrangement.spacedBy(Dimens.lg)) {
-                    when (s) {
-                        Analysis.Idle -> Hint(stringResource(R.string.probe_idle_any))
-                        is Analysis.Loading -> Busy(stringResource(s.message))
-                        is Analysis.Failed -> Problem(s.message)
-                        is Analysis.FileLink -> FileBody(s, url.trim(), request, vm, add)
-                        is Analysis.WebPage -> WebPageBody(onFind = { vm.findVideos(url.trim(), request.headers) })
-                        is Analysis.Torrent -> TorrentBody(s, vm, add)
-                        is Analysis.Video -> VideoBody(s.meta, url.trim(), request, vm, add)
+            if (isBatch) {
+                BatchBody(
+                    urls = batchUrls,
+                    request = request,
+                    vm = vm,
+                    mirrors = mirrors,
+                    checksum = checksum,
+                    start = start,
+                )
+            } else {
+                AnimatedContent(state, contentKey = { it::class }, label = "analysis") { s ->
+                    Column(verticalArrangement = Arrangement.spacedBy(Dimens.lg)) {
+                        when (s) {
+                            Analysis.Idle -> Hint(stringResource(R.string.probe_idle_any))
+                            is Analysis.Loading -> Busy(stringResource(s.message))
+                            is Analysis.Failed -> Problem(s.message)
+                            is Analysis.FileLink -> FileBody(s, batchUrls.singleOrNull() ?: url.trim(), request, vm, mirrors, checksum, add)
+                            is Analysis.WebPage -> WebPageBody(onFind = { vm.findVideos(url.trim(), request.headers) })
+                            is Analysis.Torrent -> TorrentBody(s, vm, add)
+                            is Analysis.Video -> VideoBody(s.meta, url.trim(), request, vm, add)
+                        }
                     }
                 }
             }
@@ -294,7 +366,103 @@ internal fun Actions(onLater: () -> Unit, onStart: () -> Unit, enabled: Boolean 
 }
 
 @Composable
-private fun ColumnScope.FileBody(s: Analysis.FileLink, url: String, request: AddRequest, vm: AddViewModel, add: (suspend () -> Long) -> Unit) {
+private fun AdvancedOptionsSection(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    mirrors: String,
+    onMirrorsChange: (String) -> Unit,
+    checksum: String,
+    onChecksumChange: (String) -> Unit,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(Dimens.md),
+            ) {
+                Text(
+                    text = "Advanced (Mirrors & Checksum)",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = null,
+                )
+            }
+            if (expanded) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(Dimens.sm),
+                    modifier = Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md),
+                ) {
+                    OutlinedTextField(
+                        value = mirrors,
+                        onValueChange = onMirrorsChange,
+                        label = { Text("Mirror URLs (one per line)") },
+                        placeholder = { Text("https://mirror.example.com/file.zip") },
+                        minLines = 2,
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = checksum,
+                        onValueChange = onChecksumChange,
+                        label = { Text("Expected Checksum (MD5 / SHA-256)") },
+                        placeholder = { Text("MD5 (32 hex) or SHA-256 (64 hex)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.BatchBody(
+    urls: List<String>,
+    request: AddRequest,
+    vm: AddViewModel,
+    mirrors: String,
+    checksum: String,
+    start: (suspend () -> Long) -> Unit,
+) {
+    val defaults by vm.connections.collectAsStateWithLifecycle()
+    var connections by rememberSaveable { mutableFloatStateOf(-1f) }
+    if (connections < 0 && defaults > 0) connections = defaults.toFloat()
+    val kind = FileKind.of(urls.first(), null)
+    Header(
+        icon = { ShapeIcon(kind.icon, kind.shape, kind.tone.container, kind.tone.onContainer, size = 40.dp, iconSize = 20.dp) },
+        title = "Batch: ${urls.size} URLs",
+        lines = listOf(urls.first(), if (urls.size > 1) "… ${urls.last()}" else "").filter { it.isNotEmpty() },
+    )
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.add_connections), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text("${connections.toInt().coerceAtLeast(1)}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        Slider(value = connections.coerceIn(1f, 32f), onValueChange = { connections = it }, valueRange = 1f..32f, steps = 30)
+    }
+    val go = { startNow: Boolean ->
+        start { vm.addBatch(urls, request.pageUrl, request.headers, connections.toInt(), startNow, mirrors, checksum) }
+    }
+    Actions(onLater = { go(false) }, onStart = { go(true) })
+}
+
+@Composable
+private fun ColumnScope.FileBody(
+    s: Analysis.FileLink,
+    url: String,
+    request: AddRequest,
+    vm: AddViewModel,
+    mirrors: String,
+    checksum: String,
+    add: (suspend () -> Long) -> Unit,
+) {
     val info = s.info
     var name by rememberSaveable(info.finalUrl) { mutableStateOf(request.fileName ?: info.fileName.orEmpty()) }
     val defaults by vm.connections.collectAsStateWithLifecycle()
@@ -316,7 +484,7 @@ private fun ColumnScope.FileBody(s: Analysis.FileLink, url: String, request: Add
     }
     val go = { start: Boolean ->
         // The typed link, not the redirect target: an expired signed URL is re-resolved from it later.
-        add { vm.addFile(url, name, request.pageUrl, request.headers, connections.toInt(), start) }
+        add { vm.addFile(url, name, request.pageUrl, request.headers, connections.toInt(), start, mirrors, checksum) }
     }
     Actions(onLater = { go(false) }, onStart = { go(true) })
 }

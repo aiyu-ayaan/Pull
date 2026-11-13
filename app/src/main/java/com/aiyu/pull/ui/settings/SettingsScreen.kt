@@ -1,6 +1,9 @@
 package com.aiyu.pull.ui.settings
 
 import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,9 +15,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
@@ -120,9 +125,10 @@ private fun SettingsPage.look(): PageLook {
     }
 }
 
-/** Settings home: one row per category. */
+/** Settings home: one row per category, plus quick Backup & restore actions. */
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onPage: (SettingsPage) -> Unit, modifier: Modifier = Modifier) {
+    val vm: SettingsViewModel = hiltViewModel()
     SettingsScaffold(stringResource(R.string.settings_title), onBack, modifier) {
         item {
             Group {
@@ -138,6 +144,9 @@ fun SettingsScreen(onBack: () -> Unit, onPage: (SettingsPage) -> Unit, modifier:
                     )
                 }
             }
+        }
+        item {
+            BackupRestoreSection(vm)
         }
     }
 }
@@ -172,6 +181,26 @@ private fun LazyListScope.downloads(s: Settings, vm: SettingsViewModel) {
         Section(R.string.settings_section_behavior) {
             SwitchItem(R.string.settings_auto_resume, R.string.settings_auto_resume_hint, s.autoResume, vm::setAutoResume)
         }
+    }
+    item {
+        SectionText("Network / Schedule") {
+            SwitchItemText(
+                title = "Download schedule",
+                hint = "Auto-start queued downloads during the scheduled window and pause outside it",
+                checked = s.scheduleEnabled,
+            ) { on -> vm.update { setScheduleEnabled(on) } }
+            HourPickerItem(
+                title = "Start hour",
+                hour = s.scheduleStartHour,
+            ) { h -> vm.update { setScheduleStartHour(h) } }
+            HourPickerItem(
+                title = "End hour",
+                hour = s.scheduleEndHour,
+            ) { h -> vm.update { setScheduleEndHour(h) } }
+        }
+    }
+    item {
+        BackupRestoreSection(vm)
     }
 }
 
@@ -465,12 +494,121 @@ internal fun Group(content: @Composable () -> Unit) {
 
 @Composable
 internal fun Section(title: Int, content: @Composable () -> Unit) {
+    SectionText(stringResource(title), content)
+}
+
+@Composable
+internal fun SectionText(title: String, content: @Composable () -> Unit) {
     Column {
         Text(
-            stringResource(title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+            title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = Dimens.lg, bottom = Dimens.sm, top = Dimens.sm),
         )
         Group(content)
+    }
+}
+
+@Composable
+private fun SwitchItemText(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(hint) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        colors = itemColors(),
+        modifier = Modifier.clickable(role = Role.Switch) { onChange(!checked) },
+    )
+}
+
+private fun formatHour(hour: Int): String = String.format("%02d:00", hour.coerceIn(0, 23))
+
+@Composable
+private fun HourPickerItem(title: String, hour: Int, onPick: (Int) -> Unit) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(formatHour(hour)) },
+        colors = itemColors(),
+        modifier = Modifier.clickable { open = true },
+    )
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(title) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()).selectableGroup()) {
+                    (0..23).forEach { h ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = Dimens.minTouch)
+                                .selectable(h == hour, role = Role.RadioButton) { open = false; onPick(h) },
+                        ) {
+                            RadioButton(selected = h == hour, onClick = null)
+                            Text(formatHour(h), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = Dimens.md))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+}
+
+@Composable
+private fun BackupRestoreSection(vm: SettingsViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var statusText by remember { mutableStateOf<String?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    val json = vm.exportBackupJson()
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(json) }
+                }.onSuccess {
+                    statusText = "Backup exported"
+                    Toast.makeText(context, "Backup exported", Toast.LENGTH_SHORT).show()
+                }.onFailure { e ->
+                    statusText = "Export failed: ${e.message ?: "error"}"
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    vm.importBackupJson(json)
+                }.onSuccess { data ->
+                    val msg = "Restored settings, ${data.bookmarks.size} bookmarks & ${data.shortcuts.size} shortcuts"
+                    statusText = msg
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }.onFailure { e ->
+                    statusText = "Import failed: ${e.message ?: "invalid JSON"}"
+                }
+            }
+        }
+    }
+
+    SectionText("Backup & restore") {
+        ActionItem(
+            title = "Export backup",
+            hint = statusText ?: "Save settings, bookmarks and shortcuts as JSON",
+        ) {
+            exportLauncher.launch("pull-backup.json")
+        }
+        ActionItem(
+            title = "Import backup",
+            hint = "Restore settings, bookmarks and shortcuts from JSON",
+        ) {
+            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+        }
     }
 }
 
