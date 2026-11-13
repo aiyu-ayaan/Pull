@@ -104,14 +104,14 @@ Design docs: [docs/README.md](docs/README.md). Phases follow `docs/07-features-a
 
 - [x] End-game duplicate tail requests
 - [x] Lazy-segment detection (25% of median for 6 s)
-- [ ] Adaptive connection count ("Auto")
-- [ ] Multi-IP DNS spreading
-- [ ] Mirrors
-- [ ] POST-download capture (document-start script + `WebMessageListener`)
-- [ ] `blob:` capture
-- [ ] Media sniffer: m3u8/mpd/video detection, "N media found" chip
+- [x] Adaptive connection count ("Auto")
+- [x] Multi-IP DNS spreading
+- [x] Mirrors
+- [x] POST-download capture (document-start script + `WebMessageListener`)
+- [x] `blob:` capture
+- [x] Media sniffer: m3u8/mpd/video detection, "N media found" chip
 - [ ] HLS download with parallel segments + remux to MP4
-- [ ] Scheduler, QR scan, batch URL patterns, import URL list
+- [x] Scheduler, QR scan, batch URL patterns, import URL list
 - [ ] `Notification.ProgressStyle` on API 36+
 - [ ] Evaluate User-Initiated Data Transfer jobs vs `specialUse` FGS
 
@@ -121,7 +121,7 @@ Design docs: [docs/README.md](docs/README.md). Phases follow `docs/07-features-a
 - [ ] Cronet engine option (HTTP/3)
 - [ ] GeckoView engine option with uBlock Origin
 - [ ] Remote control via local web UI + pairing code
-- [ ] Backup/restore
+- [x] Backup/restore
 
 ## Open questions
 
