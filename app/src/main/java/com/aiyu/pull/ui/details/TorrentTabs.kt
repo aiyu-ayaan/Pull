@@ -2,8 +2,10 @@ package com.aiyu.pull.ui.details
 
 import android.text.format.DateUtils
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +20,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Campaign
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Sync
@@ -60,6 +66,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aiyu.pull.R
+import com.aiyu.pull.download.FilePriority
 import com.aiyu.pull.download.TorrentCommand
 import com.aiyu.pull.download.TorrentLive
 import com.aiyu.pull.ui.components.FileKind
@@ -126,9 +133,14 @@ fun LazyListScope.torrentTab(
         TorrentTab.FILES -> {
             item(key = "files-head") { FilesCard(view, onSelectFiles) }
             val files = t?.files.orEmpty()
-            items(files.size, key = { "file$it" }) { i -> FileRow(files[i]) }
+            items(files.size, key = { "file$it" }) { i ->
+                FileRow(files[i]) { p -> onCommand(TorrentCommand.SetFilePriority(i, p)) }
+            }
         }
         TorrentTab.TRACKERS -> {
+            val custom = view.entity.extraTrackers.lines().map(String::trim).filter(String::isNotEmpty).toSet()
+            val list = t?.trackers.orEmpty()
+            val allUrls = if (list.isNotEmpty()) list.map { it.url } else custom.toList()
             item(key = "tr-actions") {
                 Row(horizontalArrangement = Arrangement.spacedBy(Dimens.sm)) {
                     FilledTonalButton(onClick = onAddTrackers, shapes = ButtonDefaults.shapes()) {
@@ -139,30 +151,49 @@ fun LazyListScope.torrentTab(
                         Icon(Icons.Rounded.Campaign, null, Modifier.size(ButtonDefaults.IconSize)); Spacer(Modifier.width(Dimens.sm))
                         Text(stringResource(R.string.trackers_reannounce))
                     }
+                    if (allUrls.isNotEmpty()) {
+                        IconButton(onClick = { onCopy("Trackers", allUrls.joinToString("\n")) }) {
+                            Icon(Icons.Rounded.ContentCopy, stringResource(R.string.trackers_copy_all))
+                        }
+                    }
                 }
             }
-            val list = t?.trackers.orEmpty()
-            if (list.isEmpty()) item(key = "tr-empty") { Empty(if (t == null) R.string.torrent_not_running else R.string.trackers_none) }
-            items(list, key = { "tr" + it.url }) { tr ->
-                ListRow(
-                    title = tr.url,
-                    subtitle = buildString {
-                        append(stringResource(R.string.tracker_tier, tr.tier))
-                        append(" · ")
-                        append(
-                            stringResource(
-                                when {
-                                    tr.updating -> R.string.tracker_updating
-                                    tr.working -> R.string.tracker_working
-                                    tr.fails > 0 -> R.string.tracker_error
-                                    else -> R.string.tracker_not_contacted
-                                },
-                            ),
-                        )
-                        if (tr.message.isNotBlank()) append(" · ").append(tr.message)
-                    },
-                    onLongClick = { onCopy(tr.url, tr.url) },
-                )
+            if (list.isNotEmpty()) {
+                items(list, key = { "tr" + it.url }) { tr ->
+                    val isCustom = tr.url in custom
+                    ListRow(
+                        title = tr.url,
+                        subtitle = buildString {
+                            append(stringResource(R.string.tracker_tier, tr.tier))
+                            append(" · ")
+                            append(
+                                stringResource(
+                                    when {
+                                        tr.updating -> R.string.tracker_updating
+                                        tr.working -> R.string.tracker_working
+                                        tr.fails > 0 -> R.string.tracker_error
+                                        else -> R.string.tracker_not_contacted
+                                    },
+                                ),
+                            )
+                            if (isCustom) append(" · ").append(stringResource(R.string.tracker_custom))
+                            if (tr.message.isNotBlank()) append(" · ").append(tr.message)
+                        },
+                        onLongClick = { onCopy(tr.url, tr.url) },
+                        onRemove = if (isCustom) ({ onCommand(TorrentCommand.RemoveTracker(tr.url)) }) else null,
+                    )
+                }
+            } else if (custom.isNotEmpty()) {
+                items(custom.toList(), key = { "tr-custom-$it" }) { url ->
+                    ListRow(
+                        title = url,
+                        subtitle = stringResource(R.string.tracker_custom),
+                        onLongClick = { onCopy(url, url) },
+                        onRemove = { onCommand(TorrentCommand.RemoveTracker(url)) },
+                    )
+                }
+            } else {
+                item(key = "tr-empty") { Empty(if (t == null) R.string.torrent_not_running else R.string.trackers_none) }
             }
         }
         TorrentTab.PEERS -> {
@@ -247,8 +278,16 @@ private fun KeyValue(label: String, value: String) {
 }
 
 @Composable
-private fun FileRow(f: com.aiyu.pull.download.TorrentFileLive) {
+private fun FileRow(f: com.aiyu.pull.download.TorrentFileLive, onPriority: (FilePriority) -> Unit) {
     val kind = FileKind.of(f.path, null)
+    var menu by remember { mutableStateOf(false) }
+    val c = MaterialTheme.colorScheme
+    val (badgeContainer, badgeText) = when (f.priority) {
+        FilePriority.SKIP -> c.surfaceContainerHighest to c.onSurfaceVariant
+        FilePriority.LOW -> c.surfaceContainerHigh to c.onSurfaceVariant
+        FilePriority.NORMAL -> c.secondaryContainer to c.onSecondaryContainer
+        FilePriority.HIGH -> c.primaryContainer to c.onPrimaryContainer
+    }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = Dimens.xs)) {
         ShapeIcon(kind.icon, kind.shape, kind.tone.container, kind.tone.onContainer, size = 36.dp, iconSize = 18.dp)
         Spacer(Modifier.width(Dimens.md))
@@ -256,24 +295,70 @@ private fun FileRow(f: com.aiyu.pull.download.TorrentFileLive) {
             Text(f.path.substringAfterLast('/'), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.MiddleEllipsis)
             Text(
                 if (f.wanted) "${formatBytes(f.done)} / ${formatBytes(f.size)}" else stringResource(R.string.file_skipped, formatBytes(f.size)),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant,
             )
             if (f.wanted && f.size > 0) LinearProgressIndicator(
                 progress = { (f.done.toFloat() / f.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             )
         }
+        Spacer(Modifier.width(Dimens.sm))
+        Box {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = badgeContainer,
+                modifier = Modifier.clickable { menu = true },
+            ) {
+                Text(
+                    stringResource(f.priority.labelRes()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = badgeText,
+                    modifier = Modifier.padding(horizontal = Dimens.sm, vertical = Dimens.xs),
+                )
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                FilePriority.entries.forEach { p ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(p.labelRes())) },
+                        trailingIcon = if (p == f.priority) ({ Icon(Icons.Rounded.Check, null) }) else null,
+                        onClick = { menu = false; if (p != f.priority) onPriority(p) },
+                    )
+                }
+            }
+        }
     }
 }
 
+private fun FilePriority.labelRes(): Int = when (this) {
+    FilePriority.SKIP -> R.string.file_priority_skip
+    FilePriority.LOW -> R.string.file_priority_low
+    FilePriority.NORMAL -> R.string.file_priority_normal
+    FilePriority.HIGH -> R.string.file_priority_high
+}
+
 @Composable
-private fun ListRow(title: String, subtitle: String, progress: Float? = null, onLongClick: (() -> Unit)? = null) {
+private fun ListRow(
+    title: String,
+    subtitle: String,
+    progress: Float? = null,
+    onLongClick: (() -> Unit)? = null,
+    onRemove: (() -> Unit)? = null,
+) {
     Column(
         Modifier.fillMaxWidth().then(
             if (onLongClick != null) Modifier.combinedClickable(onClick = {}, onLongClick = onLongClick) else Modifier,
         ).padding(vertical = Dimens.xs),
     ) {
-        Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+            if (onRemove != null) {
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Rounded.DeleteOutline, stringResource(R.string.tracker_remove))
+                }
+            }
+        }
         if (progress != null) LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
         HorizontalDivider(Modifier.padding(top = Dimens.sm), color = MaterialTheme.colorScheme.outlineVariant)
     }
@@ -316,11 +401,13 @@ private fun limitText(bps: Int) = if (bps <= 0) "∞" else formatSpeed(bps.toLon
 fun TorrentMenu(
     sequential: Boolean,
     running: Boolean,
+    hasTorrentFile: Boolean,
     onCommand: (TorrentCommand) -> Unit,
     onLimits: () -> Unit,
     onAddTrackers: () -> Unit,
     onSelectFiles: () -> Unit,
     onShareMagnet: () -> Unit,
+    onExportTorrent: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) { Icon(Icons.Rounded.MoreVert, stringResource(R.string.cd_more)) }
@@ -353,6 +440,10 @@ fun TorrentMenu(
         DropdownMenuItem(
             text = { Text(stringResource(R.string.torrent_share_magnet)) }, leadingIcon = { Icon(Icons.Rounded.Share, null) },
             onClick = { open = false; onShareMagnet() },
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.torrent_export_file)) }, leadingIcon = { Icon(Icons.Rounded.FileDownload, null) },
+            enabled = hasTorrentFile, onClick = { open = false; onExportTorrent() },
         )
     }
 }

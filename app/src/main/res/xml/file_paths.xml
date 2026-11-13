@@ -3,4 +3,6 @@
     <external-files-path name="downloads" path="Download/" />
     <!-- Torrents and videos write straight into public Download/Pull. -->
     <external-path name="public" path="Download/" />
+    <!-- Stored .torrent metadata files for export/share. -->
+    <files-path name="torrents" path="torrents/" />
 </paths>

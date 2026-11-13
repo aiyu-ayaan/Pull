@@ -37,7 +37,11 @@ data class TorrentLive(
     val createdAt: Long = 0,
 )
 
-data class TorrentFileLive(val path: String, val size: Long, val done: Long, val wanted: Boolean)
+enum class FilePriority { SKIP, LOW, NORMAL, HIGH }
+
+data class TorrentFileLive(val path: String, val size: Long, val done: Long, val priority: FilePriority = FilePriority.NORMAL) {
+    val wanted: Boolean get() = priority != FilePriority.SKIP
+}
 
 data class TrackerLive(val url: String, val tier: Int, val working: Boolean, val updating: Boolean, val fails: Int, val message: String)
 
@@ -50,6 +54,8 @@ sealed interface TorrentCommand {
     data class Sequential(val on: Boolean) : TorrentCommand
     data class Limits(val down: Int, val up: Int) : TorrentCommand
     data class AddTrackers(val urls: List<String>) : TorrentCommand
+    data class RemoveTracker(val url: String) : TorrentCommand
+    data class SetFilePriority(val index: Int, val priority: FilePriority) : TorrentCommand
 }
 
 /**

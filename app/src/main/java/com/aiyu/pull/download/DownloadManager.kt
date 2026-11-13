@@ -193,6 +193,12 @@ class DownloadManager @Inject constructor(
     fun setTorrentFiles(id: Long, selected: Set<Int>, fileCount: Int) = scope.launch {
         val all = selected.size >= fileCount
         dao.setSelectedFiles(id, if (all) "" else selected.sorted().joinToString(","))
+        dao.get(id)?.let { e ->
+            val overrides = com.aiyu.pull.data.decodeFilePriorities(e.filePriorities).filter { (idx, prio) ->
+                if (idx in selected) prio != FilePriority.SKIP else false
+            }
+            dao.setFilePriorities(id, com.aiyu.pull.data.encodeFilePriorities(overrides))
+        }
         running[id]?.transfer?.updateFiles(if (all) emptySet() else selected)
     }
 
@@ -217,6 +223,15 @@ class DownloadManager @Inject constructor(
             is TorrentCommand.AddTrackers -> dao.get(id)?.let { e ->
                 val all = (e.extraTrackers.lines() + c.urls).map(String::trim).filter { it.isNotEmpty() }.distinct()
                 dao.setExtraTrackers(id, all.joinToString("\n"))
+            }
+            is TorrentCommand.RemoveTracker -> dao.get(id)?.let { e ->
+                val kept = e.extraTrackers.lines().map(String::trim).filter { it.isNotEmpty() && it != c.url }
+                dao.setExtraTrackers(id, kept.joinToString("\n"))
+            }
+            is TorrentCommand.SetFilePriority -> dao.get(id)?.let { e ->
+                val updated = com.aiyu.pull.data.decodeFilePriorities(e.filePriorities).toMutableMap()
+                updated[c.index] = c.priority
+                dao.setFilePriorities(id, com.aiyu.pull.data.encodeFilePriorities(updated))
             }
             TorrentCommand.Recheck, TorrentCommand.Reannounce -> Unit
         }

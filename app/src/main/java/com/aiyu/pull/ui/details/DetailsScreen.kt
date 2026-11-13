@@ -156,11 +156,13 @@ fun DetailsScreen(
                     if (e?.kind == Kind.TORRENT) TorrentMenu(
                         sequential = live[e.id]?.torrent?.sequential ?: e.sequential,
                         running = e.status == Status.RUNNING,
+                        hasTorrentFile = e.torrentPath?.let { java.io.File(it).exists() } == true,
                         onCommand = { vm.torrentCommand(id, it) },
                         onLimits = { askLimits = true },
                         onAddTrackers = { askTrackers = true },
                         onSelectFiles = { pickFiles = true },
                         onShareMagnet = { com.aiyu.pull.ui.components.shareLink(context, e.url) },
+                        onExportTorrent = { e.torrentPath?.let { com.aiyu.pull.ui.components.shareTorrentFile(context, it, e.fileName) } },
                     )
                 },
                 scrollBehavior = scroll,

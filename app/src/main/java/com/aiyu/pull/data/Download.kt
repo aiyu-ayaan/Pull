@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import com.aiyu.pull.download.FilePriority
 import com.aiyu.pull.engine.RemoteInfo
 import com.aiyu.pull.engine.ResumeData
 import com.aiyu.pull.engine.SegmentState
@@ -67,6 +68,8 @@ data class DownloadEntity(
     @ColumnInfo(defaultValue = "0") val upLimit: Int = 0,
     /** Torrent: trackers the user added, one URL per line. */
     @ColumnInfo(defaultValue = "") val extraTrackers: String = "",
+    /** Torrent: per-file priority overrides as `index:PRIORITY,...` (e.g. `0:HIGH,2:SKIP`). */
+    @ColumnInfo(defaultValue = "") val filePriorities: String = "",
 ) {
     val headers: Map<String, String> get() = runCatching { Json.decodeFromString<Map<String, String>>(headersJson) }.getOrDefault(emptyMap())
 
@@ -90,6 +93,21 @@ fun decodeSegments(s: String): List<SegmentState> = s.split(';').mapNotNull { pa
     val n = part.split('-').mapNotNull(String::toLongOrNull)
     if (n.size == 3) SegmentState(n[0], n[1], n[2]) else null
 }
+
+fun encodeFilePriorities(map: Map<Int, FilePriority>): String =
+    map.entries.sortedBy { it.key }.joinToString(",") { "${it.key}:${it.value.name}" }
+
+fun decodeFilePriorities(s: String): Map<Int, FilePriority> =
+    if (s.isBlank()) emptyMap()
+    else s.split(',').mapNotNull { part ->
+        val kv = part.split(':')
+        val idx = kv.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+        val prio = kv.getOrNull(1)?.let { runCatching { FilePriority.valueOf(it) }.getOrNull() } ?: return@mapNotNull null
+        idx to prio
+    }.toMap()
+
+fun effectiveFilePriority(index: Int, selected: Set<Int>, overrides: Map<Int, FilePriority>): FilePriority =
+    overrides[index] ?: if (selected.isEmpty() || index in selected) FilePriority.NORMAL else FilePriority.SKIP
 
 @Dao
 interface DownloadDao {
@@ -156,6 +174,9 @@ interface DownloadDao {
     @Query("UPDATE downloads SET extraTrackers = :trackers WHERE id = :id")
     suspend fun setExtraTrackers(id: Long, trackers: String)
 
+    @Query("UPDATE downloads SET filePriorities = :priorities WHERE id = :id")
+    suspend fun setFilePriorities(id: Long, priorities: String)
+
     @Query("UPDATE downloads SET activeMillis = activeMillis + :activeDelta WHERE id = :id")
     suspend fun addActiveTime(id: Long, activeDelta: Long)
 
@@ -171,9 +192,13 @@ interface DownloadDao {
 
 @Database(
     entities = [DownloadEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2),
+        AutoMigration(from = 2, to = 3),
+        AutoMigration(from = 3, to = 4),
+    ],
 )
 abstract class PullDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao

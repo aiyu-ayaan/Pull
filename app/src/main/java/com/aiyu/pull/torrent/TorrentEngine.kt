@@ -10,6 +10,9 @@ import com.aiyu.pull.data.DownloadEntity
 import com.aiyu.pull.data.Encryption
 import com.aiyu.pull.data.Settings
 import com.aiyu.pull.data.SettingsRepository
+import com.aiyu.pull.data.decodeFilePriorities
+import com.aiyu.pull.data.effectiveFilePriority
+import com.aiyu.pull.download.FilePriority
 import com.aiyu.pull.download.FileStore
 import com.aiyu.pull.download.PeerLive
 import com.aiyu.pull.download.TorrentCommand
@@ -172,11 +175,12 @@ private class TorrentTransfer(
         val ti = TorrentInfo(file)
         val saveDir = File(e.saveDir ?: engine.defaultSaveDir().path).apply { mkdirs() }
         val selected = e.selectedFiles.split(',').mapNotNull(String::toIntOrNull).toSet()
+        val overrides = decodeFilePriorities(e.filePriorities)
         val fs = ti.files()
-        val priorities = Array(ti.numFiles()) { if (selected.isEmpty() || it in selected) Priority.DEFAULT else Priority.IGNORE }
+        val priorities = Array(ti.numFiles()) { effectiveFilePriority(it, selected, overrides).toLibtorrent() }
         val top = File(saveDir, if (ti.numFiles() == 1) fs.filePath(0) else ti.name())
         root = top
-        paths = (0 until ti.numFiles()).filter { selected.isEmpty() || it in selected }.map { File(saveDir, fs.filePath(it)) }
+        paths = (0 until ti.numFiles()).filter { effectiveFilePriority(it, selected, overrides) != FilePriority.SKIP }.map { File(saveDir, fs.filePath(it)) }
         if (e.fileUri == null) dao.setFile(id, Uri.fromFile(top).toString(), ti.name(), null)
 
         val flags = if (e.sequential) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
@@ -290,7 +294,7 @@ private class TorrentTransfer(
             uploaded = st.allTimeUpload(),
             pieces = pieces,
             files = List(fs.numFiles()) {
-                TorrentFileLive(fs.filePath(it), fs.fileSize(it), done?.getOrNull(it) ?: 0, prio?.getOrNull(it) != Priority.IGNORE)
+                TorrentFileLive(fs.filePath(it), fs.fileSize(it), done?.getOrNull(it) ?: 0, prio?.getOrNull(it)?.toFilePriority() ?: FilePriority.NORMAL)
             },
             trackers = trackers,
             peerList = peers,
@@ -313,7 +317,15 @@ private class TorrentTransfer(
 
     override fun updateFiles(selected: Set<Int>) {
         val h = handle?.takeIf { it.isValid } ?: return
-        h.prioritizeFiles(Array(count) { if (selected.isEmpty() || it in selected) Priority.DEFAULT else Priority.IGNORE })
+        val current = runCatching { h.filePriorities() }.getOrNull()
+        h.prioritizeFiles(
+            Array(count) { i ->
+                if (selected.isEmpty() || i in selected) {
+                    val cur = current?.getOrNull(i)
+                    if (cur == null || cur == Priority.IGNORE) Priority.DEFAULT else cur
+                } else Priority.IGNORE
+            },
+        )
     }
 
     override fun torrentCommand(c: TorrentCommand) {
@@ -324,6 +336,14 @@ private class TorrentTransfer(
             is TorrentCommand.Sequential -> if (c.on) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
             is TorrentCommand.Limits -> { h.setDownloadLimit(c.down); h.setUploadLimit(c.up) }
             is TorrentCommand.AddTrackers -> c.urls.forEach { h.addTracker(AnnounceEntry(it)) }
+            is TorrentCommand.RemoveTracker -> h.replaceTrackers(h.trackers().filter { it.url() != c.url })
+            is TorrentCommand.SetFilePriority -> if (c.index in 0 until count) {
+                val current = runCatching { h.filePriorities() }.getOrNull() ?: Array(count) { Priority.DEFAULT }
+                if (c.index < current.size) {
+                    current[c.index] = c.priority.toLibtorrent()
+                    h.prioritizeFiles(current)
+                }
+            }
         }
     }
 
@@ -337,4 +357,18 @@ private class TorrentTransfer(
         val list = paths.filter { it.exists() }.map { it.path }.toTypedArray()
         if (list.isNotEmpty()) MediaScannerConnection.scanFile(context, list, null, null)
     }
+}
+
+private fun FilePriority.toLibtorrent(): Priority = when (this) {
+    FilePriority.SKIP -> Priority.IGNORE
+    FilePriority.LOW -> Priority.LOW
+    FilePriority.NORMAL -> Priority.DEFAULT
+    FilePriority.HIGH -> Priority.TOP_PRIORITY
+}
+
+private fun Priority.toFilePriority(): FilePriority = when (this) {
+    Priority.IGNORE -> FilePriority.SKIP
+    Priority.TWO, Priority.LOW -> FilePriority.LOW
+    Priority.SIX, Priority.TOP_PRIORITY -> FilePriority.HIGH
+    else -> FilePriority.NORMAL
 }

@@ -81,6 +81,7 @@
     <string name="status_seeding_line">%1$s · seeding ↑ %2$s</string>
     <string name="action_stop_seeding">Stop seeding</string>
     <string name="torrent_share_magnet">Share magnet link</string>
+    <string name="torrent_export_file">Export .torrent</string>
     <string name="settings_section_seeding">Seeding</string>
     <string name="settings_seed">Seed after download</string>
     <string name="settings_seed_hint">Keep sharing finished torrents with other peers. Uses data and battery.</string>
@@ -283,6 +284,13 @@
     <string name="trackers_add_n">Add %d</string>
     <string name="trackers_hint">Tracker URLs, one per line</string>
     <string name="trackers_reannounce">Ask trackers again</string>
+    <string name="trackers_copy_all">Copy all</string>
+    <string name="tracker_remove">Remove tracker</string>
+    <string name="tracker_custom">Custom</string>
+    <string name="file_priority_skip">Skip</string>
+    <string name="file_priority_low">Low</string>
+    <string name="file_priority_normal">Normal</string>
+    <string name="file_priority_high">High</string>
     <string name="tracker_tier">Tier %d</string>
     <string name="tracker_working">Working</string>
     <string name="tracker_updating">Updating…</string>
