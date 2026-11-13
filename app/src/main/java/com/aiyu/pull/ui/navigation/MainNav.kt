@@ -105,9 +105,9 @@ private fun PillItem(t: Tab, selected: Boolean, badge: Int, onClick: () -> Unit)
             .background(bg)
             .selectable(selected, onClick = onClick, role = Role.Tab)
             .semantics(mergeDescendants = true) { contentDescription = if (badge > 0) "$label, $badge" else label }
+            .animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec())
             .heightIn(min = 48.dp)
-            .padding(horizontal = 16.dp)
-            .animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         NavIcon(t, selected, badge, tint = fg)
