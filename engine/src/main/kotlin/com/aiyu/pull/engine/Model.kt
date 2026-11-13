@@ -28,6 +28,9 @@ data class DownloadRequest(
     val maxConnections: Int = 8,
     val minSplitBytes: Long = 1L shl 20,
     val resume: ResumeData? = null,
+    val mirrors: List<String> = emptyList(),
+    val adaptiveConnections: Boolean = false,
+    val expectedChecksum: String? = null,
 )
 
 enum class ErrorKind {
@@ -35,10 +38,14 @@ enum class ErrorKind {
     LINK_EXPIRED,
     /** Size or ETag differs from the bytes already on disk. */
     FILE_CHANGED,
+    /** Downloaded file hash does not match [DownloadRequest.expectedChecksum]. */
+    CHECKSUM_MISMATCH,
     NETWORK,
     HTTP,
     DISK,
 }
+
+typealias ErrorCode = ErrorKind
 
 class DownloadException(val kind: ErrorKind, message: String, val httpCode: Int = 0, cause: Throwable? = null) :
     Exception(message, cause)

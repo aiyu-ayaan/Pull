@@ -21,8 +21,13 @@ import okhttp3.Response
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+import java.nio.channels.NonReadableChannelException
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
@@ -52,6 +57,7 @@ class DownloadTask(
         @Volatile var activeCall: Call? = null
         @Volatile var racerCall: Call? = null
         @Volatile var racing = false
+        @Volatile var currentMirrorUrl: String? = null
         var slowTicks = 0
         var sampledAt = current
         var speed = 0.0
@@ -64,6 +70,8 @@ class DownloadTask(
 
     private val segments = CopyOnWriteArrayList<Segment>()
     private val queue = ArrayDeque<Segment>()
+    private val activeMirrors = CopyOnWriteArrayList(request.mirrors.filter { it.isNotBlank() })
+    private val mirrorCursor = AtomicInteger(1)
     private val lock = Any()
     private val refreshLock = Mutex()
     private val liveCalls = ConcurrentHashMap.newKeySet<Call>()
@@ -71,14 +79,25 @@ class DownloadTask(
     @Volatile private var workersActive = false
     @Volatile private var info: RemoteInfo? = request.resume?.info
     private lateinit var channel: FileChannel
+    private var shadowChannel: FileChannel? = null
     private lateinit var workerScope: CoroutineScope
     private var totalSpeed = 0.0
+    private var lastTickSpeed = 0.0
+    private var lastAdaptiveSpeed = 0.0
+    private var adaptiveCapped = false
     /** Workers holding a segment. Guarded by [lock], so a range given back is never left without a worker. */
     private var alive = 0
     private var refusalCount = 0
     private var lastRefusalMs = 0L
     private var refusalCooldownMs = RECOVERY_BASE_MS
     private var lastDownloaded = -1L
+
+    private val initialConnections: Int
+        get() = if (request.adaptiveConnections && request.maxConnections > 2) {
+            minOf(2, request.maxConnections)
+        } else {
+            request.maxConnections.coerceAtLeast(1)
+        }
 
     init {
         // A download first seen as non-resumable keeps its bytes too: the next request asks for the offset and the
@@ -105,7 +124,12 @@ class DownloadTask(
 
     suspend fun run(): RemoteInfo = withContext(Dispatchers.IO) {
         // Closed only after every worker has stopped, so a pause never shows up as a write error.
-        try { work() } finally { if (::channel.isInitialized) runCatching { channel.close() } }
+        try {
+            work()
+        } finally {
+            shadowChannel?.let { runCatching { it.close() } }
+            if (::channel.isInitialized) runCatching { channel.close() }
+        }
     }
 
     private suspend fun work(): RemoteInfo = coroutineScope {
@@ -123,6 +147,7 @@ class DownloadTask(
                 throw DownloadException(ErrorKind.NETWORK, "Download stopped before the end")
             }
             try { channel.force(false) } catch (e: IOException) { throw DownloadException(ErrorKind.DISK, e.message ?: "fsync failed", cause = e) }
+            verifyChecksum()
             sample()
             i
         } finally {
@@ -162,7 +187,8 @@ class DownloadTask(
                 segments += seg0
                 if (i.acceptRanges && total > 0) {
                     // Immediate ramp-up: all parts start now instead of one more per round trip.
-                    val n = (total / request.minSplitBytes).coerceIn(1, request.maxConnections.toLong()).toInt()
+                    val targetConn = initialConnections
+                    val n = (total / request.minSplitBytes).coerceIn(1, targetConn.toLong()).toInt()
                     val part = total / n
                     seg0.end.set(part - 1)
                     for (k in 1 until n) {
@@ -173,6 +199,7 @@ class DownloadTask(
                 }
                 info = i
             }
+            lastDownloaded = 0L
             startWorkers(first = seg0 to first)
         } catch (t: Throwable) {
             runCatching { first.close() }
@@ -181,25 +208,26 @@ class DownloadTask(
     }
 
     /** Returns when every worker is done, including the ones [upgrade] or recovery add later. */
-    private suspend fun startWorkers(first: Pair<Segment, Response>?): Unit = coroutineScope {
-        workerScope = this
+    private suspend fun startWorkers(first: Pair<Segment, Response>?) {
         workersActive = true
         try {
-            val i = info!!
-            val workers = if (i.acceptRanges && i.totalBytes > 0) request.maxConnections.coerceAtLeast(1) else 1
-            if (first != null) {
-                synchronized(lock) {
-                    first.first.active = true
-                    first.first.activeSinceMs = System.currentTimeMillis()
-                    alive++
+            coroutineScope {
+                workerScope = this
+                val i = info!!
+                val workers = if (i.acceptRanges && i.totalBytes > 0) initialConnections else 1
+                if (first != null) {
+                    synchronized(lock) {
+                        first.first.active = true
+                        first.first.activeSinceMs = System.currentTimeMillis()
+                        alive++
+                    }
                 }
+                launch { worker(first) }
+                repeat(workers - 1) { launch { worker(null) } }
             }
-            launch { worker(first) }
-            repeat(workers - 1) { launch { worker(null) } }
         } finally {
-            // workersActive stays true until coroutineScope exits, which happens after all child launches finish.
+            workersActive = false
         }
-        workersActive = false
     }
 
     /** A server first seen as non-resumable just honoured an offset: keep the bytes and let the other workers in. */
@@ -210,7 +238,7 @@ class DownloadTask(
             if (i.acceptRanges || known <= 0) return
             seg.end.compareAndSet(Long.MAX_VALUE, known - 1)
             info = i.copy(acceptRanges = true, totalBytes = known)
-            repeat(request.maxConnections - 1) { workerScope.launch { worker(null) } }
+            repeat(initialConnections - 1) { workerScope.launch { worker(null) } }
         }
     }
 
@@ -339,6 +367,13 @@ class DownloadTask(
                     currentCoroutineContext().ensureActive()
                     if (cancelled) throw kotlinx.coroutines.CancellationException("paused")
                     if (seg.remaining <= 0) break
+                    val failedMirror = seg.currentMirrorUrl
+                    if (failedMirror != null) {
+                        seg.currentMirrorUrl = null
+                        activeMirrors.remove(failedMirror)
+                        if (seg.current.get() > before) onWorkerProgress()
+                        continue
+                    }
                     if (seg.current.get() > before) { attempt = 0; onWorkerProgress() }
                     attempt++
                     seg.retries++
@@ -352,6 +387,7 @@ class DownloadTask(
         } finally {
             pending?.close()
             seg.activeCall = null
+            seg.currentMirrorUrl = null
             seg.active = false
         }
         return true
@@ -364,39 +400,80 @@ class DownloadTask(
         }
     }
 
+    private fun pickSegmentUrl(primaryUrl: String): Pair<String, Boolean> {
+        val mirrors = activeMirrors
+        if (mirrors.isEmpty()) return primaryUrl to false
+        val candidates = ArrayList<String>(1 + mirrors.size)
+        candidates.add(primaryUrl)
+        candidates.addAll(mirrors)
+        if (candidates.size <= 1) return primaryUrl to false
+        val idx = mirrorCursor.getAndIncrement().mod(candidates.size)
+        return candidates[idx] to (idx != 0)
+    }
+
     private suspend fun openSegment(seg: Segment, refreshed: Boolean = false): Response {
-        val i = info!!
-        val end = seg.end.get().takeIf { it != Long.MAX_VALUE }
-        val r = execute(rangeRequest(i.finalUrl, request.headers, seg.current.get(), end), seg = seg)
-        val code = r.code
-        if (code.isExpiredLinkCode()) {
-            r.close()
-            if (refreshed) throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired (HTTP $code)", code)
-            refreshLink(i.finalUrl)
-            return openSegment(seg, refreshed = true)
-        }
-        if (code == 429 || code >= 500) { r.close(); throw Busy(code) }
-        if (code == 200 && seg.current.get() == 0L && (!i.acceptRanges || seg.start == 0L)) {
-            if (i.totalBytes >= 0 && r.body.contentLength() >= 0 && r.body.contentLength() != i.totalBytes) {
-                r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed size")
+        while (true) {
+            val i = info!!
+            val end = seg.end.get().takeIf { it != Long.MAX_VALUE }
+            val (targetUrl, isMirror) = if (i.acceptRanges && !refreshed) {
+                pickSegmentUrl(i.finalUrl)
+            } else {
+                i.finalUrl to false
             }
+            seg.currentMirrorUrl = if (isMirror) targetUrl else null
+            val r = try {
+                execute(rangeRequest(targetUrl, request.headers, seg.current.get(), end), seg = seg)
+            } catch (e: IOException) {
+                if (isMirror && !cancelled) {
+                    seg.currentMirrorUrl = null
+                    activeMirrors.remove(targetUrl)
+                    continue
+                }
+                throw e
+            }
+            val code = r.code
+            if (isMirror) {
+                val range = if (code == 206) parseContentRange(r.header("Content-Range")) else null
+                val valid = code == 206 && range != null && range.first == seg.current.get() &&
+                    (i.totalBytes < 0 || range.third < 0 || range.third == i.totalBytes) &&
+                    sameEtag(i.etag, r.header("ETag"))
+                if (!valid) {
+                    r.close()
+                    seg.currentMirrorUrl = null
+                    activeMirrors.remove(targetUrl)
+                    continue
+                }
+                return r
+            }
+            if (code.isExpiredLinkCode()) {
+                r.close()
+                if (refreshed) throw DownloadException(ErrorKind.LINK_EXPIRED, "Link expired (HTTP $code)", code)
+                refreshLink(i.finalUrl)
+                return openSegment(seg, refreshed = true)
+            }
+            if (code == 429 || code >= 500) { r.close(); throw Busy(code) }
+            if (code == 200 && seg.current.get() == 0L && (!i.acceptRanges || seg.start == 0L)) {
+                if (i.totalBytes >= 0 && r.body.contentLength() >= 0 && r.body.contentLength() != i.totalBytes) {
+                    r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed size")
+                }
+                return r
+            }
+            if (code != 206) {
+                r.close()
+                val message = when {
+                    code != 200 -> "HTTP $code"
+                    i.acceptRanges -> "Server stopped accepting resume requests"
+                    else -> "Connection lost and this server cannot resume. Refresh the link or restart the download."
+                }
+                throw DownloadException(ErrorKind.HTTP, message, code)
+            }
+            val range = parseContentRange(r.header("Content-Range"))
+            val changed = range == null || range.first != seg.current.get() ||
+                (i.totalBytes >= 0 && range.third >= 0 && range.third != i.totalBytes) || !sameEtag(i.etag, r.header("ETag"))
+            if (changed) { r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed") }
+            if (!i.acceptRanges) upgrade(seg, range.third)
             return r
         }
-        if (code != 206) {
-            r.close()
-            val message = when {
-                code != 200 -> "HTTP $code"
-                i.acceptRanges -> "Server stopped accepting resume requests"
-                else -> "Connection lost and this server cannot resume. Refresh the link or restart the download."
-            }
-            throw DownloadException(ErrorKind.HTTP, message, code)
-        }
-        val range = parseContentRange(r.header("Content-Range"))
-        val changed = range == null || range.first != seg.current.get() ||
-            (i.totalBytes >= 0 && range.third >= 0 && range.third != i.totalBytes) || !sameEtag(i.etag, r.header("ETag"))
-        if (changed) { r.close(); throw DownloadException(ErrorKind.FILE_CHANGED, "The file on the server changed") }
-        if (!i.acceptRanges) upgrade(seg, range.third)
-        return r
     }
 
     /**
@@ -467,6 +544,11 @@ class DownloadTask(
         buffer.limit(buffer.position() + allowed)
         var p = cur
         try {
+            shadowChannel?.let { sc ->
+                val dup = buffer.duplicate()
+                var sp = cur
+                while (dup.hasRemaining()) sp += sc.write(dup, sp)
+            }
             while (buffer.hasRemaining()) p += channel.write(buffer, p)
         } catch (e: IOException) {
             throw DownloadException(ErrorKind.DISK, e.message ?: "Write failed", cause = e)
@@ -490,9 +572,81 @@ class DownloadTask(
     }
 
     private suspend fun openChannel(i: RemoteInfo): FileChannel = try {
-        openFile(i)
+        openFile(i).also { ch ->
+            if (!request.expectedChecksum.isNullOrBlank()) {
+                val readable = try {
+                    ch.read(ByteBuffer.allocate(0), 0L)
+                    true
+                } catch (_: NonReadableChannelException) {
+                    false
+                }
+                if (!readable && shadowChannel == null) {
+                    val tmp = Files.createTempFile("pull-chk-", ".tmp")
+                    shadowChannel = FileChannel.open(
+                        tmp,
+                        StandardOpenOption.READ,
+                        StandardOpenOption.WRITE,
+                        StandardOpenOption.DELETE_ON_CLOSE,
+                    )
+                }
+            }
+        }
     } catch (e: IOException) {
         throw DownloadException(ErrorKind.DISK, e.message ?: "Cannot open file", cause = e)
+    }
+
+    private fun verifyChecksum() {
+        val raw = request.expectedChecksum?.trim() ?: return
+        if (raw.isEmpty()) return
+        val (algorithm, expectedHex) = parseExpectedChecksum(raw)
+        val digest = try {
+            MessageDigest.getInstance(algorithm)
+        } catch (e: Exception) {
+            throw DownloadException(ErrorCode.CHECKSUM_MISMATCH, "Unsupported checksum algorithm: $algorithm", cause = e)
+        }
+        val readCh = shadowChannel ?: channel
+        val size = try {
+            val total = info?.totalBytes ?: -1L
+            if (total >= 0L) total else readCh.size()
+        } catch (e: IOException) {
+            throw DownloadException(ErrorKind.DISK, e.message ?: "Cannot read file size", cause = e)
+        }
+        val buf = ByteBuffer.allocate(bufferBytes)
+        var pos = 0L
+        try {
+            while (pos < size) {
+                buf.clear()
+                val maxRead = (size - pos).coerceAtMost(buf.capacity().toLong()).toInt()
+                buf.limit(maxRead)
+                val n = readCh.read(buf, pos)
+                if (n <= 0) break
+                buf.flip()
+                digest.update(buf)
+                pos += n
+            }
+        } catch (e: IOException) {
+            throw DownloadException(ErrorKind.DISK, e.message ?: "Cannot read file for checksum", cause = e)
+        }
+        val actualHex = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!actualHex.equals(expectedHex, ignoreCase = true)) {
+            throw DownloadException(
+                ErrorCode.CHECKSUM_MISMATCH,
+                "$algorithm mismatch: expected $expectedHex, got $actualHex",
+            )
+        }
+    }
+
+    private fun parseExpectedChecksum(raw: String): Pair<String, String> {
+        val trimmed = raw.trim()
+        val lower = trimmed.lowercase()
+        return when {
+            lower.startsWith("md5:") || lower.startsWith("md5=") -> "MD5" to trimmed.substring(4).trim()
+            lower.startsWith("sha256:") || lower.startsWith("sha256=") -> "SHA-256" to trimmed.substring(7).trim()
+            lower.startsWith("sha-256:") || lower.startsWith("sha-256=") -> "SHA-256" to trimmed.substring(8).trim()
+            trimmed.length == 32 -> "MD5" to trimmed
+            trimmed.length == 64 -> "SHA-256" to trimmed
+            else -> "SHA-256" to trimmed
+        }
     }
 
     private suspend fun <T> retrying(block: () -> T): T {
@@ -524,7 +678,8 @@ class DownloadTask(
         val now = downloaded()
         val delta = if (lastDownloaded < 0) 0 else (now - lastDownloaded).coerceAtLeast(0)
         lastDownloaded = now
-        totalSpeed = if (totalSpeed == 0.0) delta * 4.0 else totalSpeed * (1 - ALPHA) + delta * 4.0 * ALPHA
+        lastTickSpeed = delta * 4.0
+        totalSpeed = if (totalSpeed == 0.0) lastTickSpeed else totalSpeed * (1 - ALPHA) + lastTickSpeed * ALPHA
         val segs = segments.sortedBy { it.start }.map { s ->
             val cur = s.current.get()
             val d = (cur - s.sampledAt).coerceAtLeast(0)
@@ -541,6 +696,27 @@ class DownloadTask(
         if (!i.acceptRanges || i.totalBytes <= 0) return
         val nowMs = System.currentTimeMillis()
         val maxConn = request.maxConnections.coerceAtLeast(1)
+
+        // 0. Adaptive connection count ("Auto"): ramp up by 1 worker via steal() while total throughput grows >= ~10%.
+        if (request.adaptiveConnections && maxConn > 2 && !adaptiveCapped && !inRefusalCooldown(nowMs)) {
+            val currentSpeed = maxOf(totalSpeed, lastTickSpeed)
+            if (currentSpeed > 0.0) {
+                if (lastAdaptiveSpeed == 0.0 || currentSpeed >= lastAdaptiveSpeed * 1.10) {
+                    var splitSeg: Segment? = null
+                    synchronized(lock) {
+                        if (alive + queue.size < maxConn) {
+                            splitSeg = steal()?.also { queue.addLast(it) }
+                        }
+                    }
+                    if (splitSeg != null) {
+                        lastAdaptiveSpeed = totalSpeed.coerceAtLeast(1.0)
+                        workerScope.launch { worker(null) }
+                    }
+                } else {
+                    adaptiveCapped = true
+                }
+            }
+        }
 
         // 1. Adaptive recovery: if earlier 403/429/503 refusals reduced concurrency, probe back up after cooldown.
         var launchRecovery = false

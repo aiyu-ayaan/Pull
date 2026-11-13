@@ -3,21 +3,42 @@ package com.aiyu.pull.engine
 import kotlinx.coroutines.delay
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
+import okhttp3.Dns
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.net.InetAddress
 import java.net.URLDecoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Resolves all IPv4/IPv6 addresses for a hostname and rotates the returned order on each lookup so concurrent
+ * HTTP/1.1 segment connections spread across multiple server IPs when present.
+ */
+class RoundRobinDns(private val delegate: Dns = Dns.SYSTEM) : Dns {
+    private val cursors = ConcurrentHashMap<String, AtomicInteger>()
+
+    override fun lookup(hostname: String): List<InetAddress> {
+        val addresses = delegate.lookup(hostname)
+        if (addresses.size <= 1) return addresses
+        val offset = cursors.computeIfAbsent(hostname) { AtomicInteger(0) }.getAndIncrement().mod(addresses.size)
+        if (offset == 0) return addresses
+        return addresses.subList(offset, addresses.size) + addresses.subList(0, offset)
+    }
+}
 
 /**
  * Client for segment workers. HTTP/1.1 only: over HTTP/2 OkHttp would put every segment on one TCP connection,
  * which defeats the point of splitting. The pool keeps one idle socket per worker so a stolen range reuses it.
  */
-fun segmentClient(maxIdle: Int = 64): OkHttpClient = OkHttpClient.Builder()
+fun segmentClient(maxIdle: Int = 64, dns: Dns = RoundRobinDns()): OkHttpClient = OkHttpClient.Builder()
     .protocols(listOf(Protocol.HTTP_1_1))
+    .dns(dns)
     .dispatcher(
         Dispatcher().apply {
             maxRequests = maxOf(128, maxIdle * 2)

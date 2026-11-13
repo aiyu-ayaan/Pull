@@ -22,11 +22,15 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.io.RandomAccessFile
+import java.net.InetAddress
 import java.nio.channels.FileChannel
 import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
+import okhttp3.Dns
 
 class DownloadTaskTest {
     private val data = Random(42).nextBytes(5 * 1024 * 1024 + 12_345)
@@ -322,5 +326,121 @@ class DownloadTaskTest {
         assertTrue("expected acceptRanges=true after verify retry", info.acceptRanges)
         assertFileMatches()
         assertTrue("expected parallel ranges after verify retry, got $ranges", ranges.size >= 8)
+    }
+
+    @Test fun roundRobinDnsRotatesAddressesAcrossLookups() {
+        val ip1 = InetAddress.getByAddress("cdn.example.com", byteArrayOf(192.toByte(), 0, 2, 1))
+        val ip2 = InetAddress.getByAddress("cdn.example.com", byteArrayOf(192.toByte(), 0, 2, 2))
+        val ip3 = InetAddress.getByAddress("cdn.example.com", byteArrayOf(0x20, 0x01, 0x0d, 0xb8.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
+        val dns = RoundRobinDns(Dns { listOf(ip1, ip2, ip3) })
+
+        assertEquals(listOf(ip1, ip2, ip3), dns.lookup("cdn.example.com"))
+        assertEquals(listOf(ip2, ip3, ip1), dns.lookup("cdn.example.com"))
+        assertEquals(listOf(ip3, ip1, ip2), dns.lookup("cdn.example.com"))
+        assertEquals(listOf(ip1, ip2, ip3), dns.lookup("cdn.example.com"))
+        assertTrue("segmentClient must use RoundRobinDns by default", segmentClient().dns is RoundRobinDns)
+    }
+
+    @Test fun mirrorsRotateAndDropFailingMirrorWithoutFailingDownload() = runBlocking {
+        val workingMirror = MockWebServer()
+        val brokenMirror = MockWebServer()
+        val workingHits = AtomicInteger(0)
+        val brokenHits = AtomicInteger(0)
+        workingMirror.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                workingHits.incrementAndGet()
+                return serve(request.headers["Range"])
+            }
+        }
+        brokenMirror.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                brokenHits.incrementAndGet()
+                return MockResponse.Builder().code(503).build()
+            }
+        }
+        workingMirror.start()
+        brokenMirror.start()
+        try {
+            val req = DownloadRequest(
+                url = server.url("/f").toString(),
+                maxConnections = 3,
+                minSplitBytes = 256 * 1024,
+                mirrors = listOf(
+                    brokenMirror.url("/f").toString(),
+                    workingMirror.url("/f").toString(),
+                ),
+            )
+            DownloadTask(client, req, opener(), retryBaseMillis = 10).run()
+            assertFileMatches()
+            assertTrue("expected working mirror to serve segments, got ${workingHits.get()}", workingHits.get() >= 1)
+            assertEquals("broken mirror should be dropped after first failure", 1, brokenHits.get())
+        } finally {
+            workingMirror.close()
+            brokenMirror.close()
+        }
+    }
+
+    @Test fun adaptiveConnectionsStartsAtTwoAndRampsWhenThroughputGrows() = runBlocking {
+        throttle = true
+        val req = DownloadRequest(
+            url = server.url("/f").toString(),
+            maxConnections = 8,
+            minSplitBytes = 256 * 1024,
+            adaptiveConnections = true,
+        )
+        val t = DownloadTask(client, req, opener(), retryBaseMillis = 10)
+        t.run()
+        assertFileMatches()
+        assertTrue("expected adaptive connections to ramp up from 2 via steal(), got ${ranges.size} ranges", ranges.size > 2)
+    }
+
+    @Test fun adaptiveConnectionsStopsRampingWhenThroughputDoesNotGrow() = runBlocking {
+        // Unthrottled fast download completes before ramp or when speed stops growing by >= 10%
+        val req = DownloadRequest(
+            url = server.url("/f").toString(),
+            maxConnections = 8,
+            minSplitBytes = 2 * 1024 * 1024,
+            adaptiveConnections = true,
+        )
+        val t = DownloadTask(client, req, opener(), retryBaseMillis = 10)
+        t.run()
+        assertFileMatches()
+        assertEquals("expected initial split of minOf(2, maxConnections) = 2 ranges, got $ranges", 2, ranges.size)
+    }
+
+    @Test fun checksumVerificationSucceedsAndRejectsMismatch() = runBlocking {
+        val md5Hex = MessageDigest.getInstance("MD5").digest(data).joinToString("") { "%02x".format(it) }
+        val sha256Hex = MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
+
+        // 1. Valid MD5 (case-insensitive with md5: prefix)
+        DownloadTask(
+            client,
+            DownloadRequest(server.url("/f").toString(), expectedChecksum = "MD5:${md5Hex.uppercase()}"),
+            opener(),
+            retryBaseMillis = 10,
+        ).run()
+        assertFileMatches()
+
+        // 2. Valid SHA-256 (64 hex chars without prefix)
+        DownloadTask(
+            client,
+            DownloadRequest(server.url("/f").toString(), expectedChecksum = sha256Hex),
+            opener(),
+            retryBaseMillis = 10,
+        ).run()
+        assertFileMatches()
+
+        // 3. Mismatched SHA-256 throws CHECKSUM_MISMATCH
+        try {
+            DownloadTask(
+                client,
+                DownloadRequest(server.url("/f").toString(), expectedChecksum = "sha256:" + "0".repeat(64)),
+                opener(),
+                retryBaseMillis = 10,
+            ).run()
+            fail("expected CHECKSUM_MISMATCH")
+        } catch (e: DownloadException) {
+            assertEquals(ErrorCode.CHECKSUM_MISMATCH, e.kind)
+        }
     }
 }
