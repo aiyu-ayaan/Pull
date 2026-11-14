@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -258,7 +259,8 @@ fun OmniboxEditor(
         }
     }
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.statusBarsPadding().imePadding()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 720.dp).statusBarsPadding().imePadding()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = Dimens.xs, vertical = Dimens.sm),
                 verticalAlignment = Alignment.CenterVertically,
@@ -307,6 +309,7 @@ fun OmniboxEditor(
                     )
                 }
             }
+        }
         }
     }
 }
@@ -441,10 +444,11 @@ fun NewTabPage(
     onTabs: () -> Unit,
     onClose: (() -> Unit)?,
     menu: @Composable () -> Unit,
+    showTopRow: Boolean = true,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.statusBarsPadding().navigationBarsPadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = Dimens.xs), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.then(if (showTopRow) Modifier.statusBarsPadding() else Modifier).navigationBarsPadding()) {
+            if (showTopRow) Row(Modifier.fillMaxWidth().padding(horizontal = Dimens.xs), verticalAlignment = Alignment.CenterVertically) {
                 if (onClose != null) {
                     IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, stringResource(R.string.action_close)) }
                 }
@@ -452,8 +456,10 @@ fun NewTabPage(
                 TabCountButton(tabCount, onTabs)
                 menu()
             }
+            // Tablets: keep the search box and shortcut box at a reading width instead of stretching across the screen.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Dimens.lg),
+                Modifier.widthIn(max = 640.dp).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Dimens.lg),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Spacer(Modifier.height(Dimens.xl))
@@ -550,6 +556,7 @@ fun NewTabPage(
                     }
                 }
                 Spacer(Modifier.height(Dimens.xxl))
+            }
             }
         }
     }

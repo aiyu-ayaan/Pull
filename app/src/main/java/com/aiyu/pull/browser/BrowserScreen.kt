@@ -169,6 +169,7 @@ fun BrowserScreen(
     var editing by remember { mutableStateOf(false) }
     var swipeDir by remember { mutableIntStateOf(0) }
     val motion = MaterialTheme.motionScheme
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= BrowserWideWidth.value
     var longPressTarget by remember { mutableStateOf<LongPressTarget?>(null) }
 
     // WebView callbacks outlive the composition that created them; they reach closeTab through this holder.
@@ -278,14 +279,15 @@ fun BrowserScreen(
     }
 
     // Back: the last enabled handler wins, so page navigation comes first and overlays after it.
-    BackHandler(enabled = activeTab != null && (activeTab.canBack || activeTab.openerId != null || (activeTab.showNtp && activeTab.hasPage))) {
-        val tab = activeTab ?: return@BackHandler
+    fun goBack() {
+        val tab = activeTab ?: return
         when {
             tab.showNtp && tab.hasPage -> tab.showNtp = false
             tab.canBack -> tab.webView.goBack()
             else -> closeTab(tab.id)
         }
     }
+    BackHandler(enabled = activeTab != null && (activeTab.canBack || activeTab.openerId != null || (activeTab.showNtp && activeTab.hasPage))) { goBack() }
     BackHandler(enabled = showTabs) { showTabs = false }
     BackHandler(enabled = editing) { editing = false }
 
@@ -319,6 +321,25 @@ fun BrowserScreen(
                 onCloseBrowser = onClose,
             )
         }
+        if (wide && tab != null) {
+            BrowserWideBar(
+                tabs = tabs,
+                tab = tab,
+                onSelect = { select(it, 0) },
+                onCloseTab = { closeTab(it) },
+                onNewTab = { newTab("") },
+                onCloseBrowser = onClose,
+                onBack = { goBack() },
+                canBack = tab.canBack || (tab.showNtp && tab.hasPage),
+                onForward = { tab.webView.goForward() },
+                onReload = { if (tab.loading) tab.webView.stopLoading() else tab.webView.reload() },
+                onHome = { tab.captureThumbnail(); tab.showNtp = true },
+                onOmnibox = { editing = true },
+                onSiteInfo = { showShield = true },
+                onTabs = { tab.captureThumbnail(); showTabs = true },
+                menu = menu,
+            )
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             // Swiping the omnibox slides pages sideways like Chrome; other switches cross-fade.
             AnimatedContent(
@@ -340,7 +361,7 @@ fun BrowserScreen(
                         t.webView.isHapticFeedbackEnabled = false
                         t.webView
                     },
-                    modifier = Modifier.fillMaxSize().then(if (refreshId >= 0) Modifier else Modifier.statusBarsPadding()),
+                    modifier = Modifier.fillMaxSize().then(if (refreshId >= 0 || wide) Modifier else Modifier.statusBarsPadding()),
                 )
             }
             androidx.compose.animation.AnimatedVisibility(
@@ -362,6 +383,7 @@ fun BrowserScreen(
                     onTabs = { tab?.captureThumbnail(); showTabs = true },
                     onClose = onClose,
                     menu = menu,
+                    showTopRow = !wide,
                 )
             }
             val mediaCount = tab?.detectedMedia?.size ?: 0
@@ -392,7 +414,7 @@ fun BrowserScreen(
             }
         }
         AnimatedVisibility(
-            visible = tab != null && !tab.showNtp,
+            visible = !wide && tab != null && !tab.showNtp,
             enter = slideInVertically(motion.defaultSpatialSpec()) { it } + fadeIn(),
             exit = slideOutVertically(motion.fastSpatialSpec()) { it } + fadeOut(),
         ) {

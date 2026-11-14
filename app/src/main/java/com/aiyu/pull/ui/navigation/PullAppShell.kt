@@ -18,6 +18,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -230,7 +231,7 @@ private fun MainScreen(
             }
         }
         if (wide) {
-            Row(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
                 FloatingNavRail(tab, badges, onTab)
                 if (pane) {
                     list(Modifier.width(420.dp).fillMaxHeight())

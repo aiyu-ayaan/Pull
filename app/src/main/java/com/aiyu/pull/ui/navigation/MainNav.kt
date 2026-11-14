@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
@@ -147,7 +148,12 @@ private fun NavIcon(t: Tab, selected: Boolean, badge: Int, tint: Color = LocalCo
     }
     if (badge > 0) {
         BadgedBox(badge = {
-            Badge(containerColor = MaterialTheme.colorScheme.primary) { Text("$badge") }
+            // Own colour (primary blended into the selected indicator) and shifted off the glyph so it never covers it.
+            Badge(
+                containerColor = MaterialTheme.colorScheme.tertiary,
+                contentColor = MaterialTheme.colorScheme.onTertiary,
+                modifier = Modifier.offset(x = 6.dp, y = (-4).dp),
+            ) { Text(if (badge > 99) "99+" else "$badge") }
         }) { icon() }
     } else icon()
 }
@@ -159,9 +165,10 @@ fun FloatingNavRail(tab: Tab, badges: Map<Tab, Int>, onSelect: (Tab) -> Unit) {
         Modifier.fillMaxHeight().systemBarsPadding().displayCutoutPadding().padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 6.dp) {
+        // Same full-radius capsule as the phone pill, so the rail reads as that pill stood upright.
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 6.dp) {
             Column(
-                Modifier.width(88.dp).padding(vertical = 12.dp).verticalScroll(rememberScrollState()).selectableGroup(),
+                Modifier.width(96.dp).padding(vertical = 20.dp).verticalScroll(rememberScrollState()).selectableGroup(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
