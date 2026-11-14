@@ -19,12 +19,11 @@ It also downloads torrents and video-site links, and has its own browser.
 <p align="center"><a href="development/media/pull-release-0.1.1-alpha.4.mp4"><img src="development/media/pull-release-0.1.1-alpha.4.gif" width="270" alt="Pull 0.1.1-alpha.4 release video: splash, segmented downloads, the browser Shield, torrents and video sites"></a></p>
 <p align="center"><sub>Release video for 0.1.1-alpha.4 (25 s, 1440x2560). <a href="development/media/pull-release-0.1.1-alpha.4.mp4">Watch the full MP4 with sound</a>.</sub></p>
 
-> Pull is in alpha. There are no benchmark numbers yet, so this README makes no speed claim
-> against other download managers. The method for measuring one is in [`08-benchmarking.md`](development/docs/08-benchmarking.md).
-
 ## Screenshots
 
 ### Phone
+
+**Downloads**
 
 <p align="center">
   <img src="docs/screenshots/phone/active.png" width="200" alt="Active tab: total speed graph and two running downloads">
@@ -32,16 +31,22 @@ It also downloads torrents and video-site links, and has its own browser.
   <img src="docs/screenshots/phone/downloaded.png" width="200" alt="Downloaded tab: finished files grouped by day">
   <img src="docs/screenshots/phone/add.png" width="200" alt="Add sheet: size, resume support, file name and connection count">
 </p>
+
+**Drawer and settings**
+
 <p align="center">
   <img src="docs/screenshots/phone/drawer.png" width="200" alt="Side drawer with add link, open torrent, browser and settings">
   <img src="docs/screenshots/phone/settings.png" width="200" alt="Settings home with one page per category">
-  <img src="docs/screenshots/phone/browser-home.png" width="200" alt="Browser new tab page with shortcut tiles">
-  <img src="docs/screenshots/phone/browser-continue.png" width="200" alt="New tab page with the continue-with-this-tab card">
 </p>
+
+**Browser**
+
 <p align="center">
-  <img src="docs/screenshots/phone/browser-page.png" width="200" alt="Browser page with the bottom toolbar">
-  <img src="docs/screenshots/phone/browser-search.png" width="200" alt="Full-screen address bar search with history matches">
-  <img src="docs/screenshots/phone/browser-tabs.png" width="200" alt="Tab grid with page previews">
+  <img src="docs/screenshots/phone/browser-home.png" width="160" alt="Browser new tab page with shortcut tiles">
+  <img src="docs/screenshots/phone/browser-continue.png" width="160" alt="New tab page with the continue-with-this-tab card">
+  <img src="docs/screenshots/phone/browser-page.png" width="160" alt="Browser page with the bottom toolbar">
+  <img src="docs/screenshots/phone/browser-search.png" width="160" alt="Full-screen address bar search with history matches">
+  <img src="docs/screenshots/phone/browser-tabs.png" width="160" alt="Tab grid with page previews">
 </p>
 
 ### Tablet
