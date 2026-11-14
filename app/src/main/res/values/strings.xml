@@ -533,5 +533,8 @@
     </plurals>
     <string name="browser_continue_tab">Continue with this tab</string>
     <string name="browser_see_more">See more</string>
-    <string name="browser_tab_count">%d tabs</string>
+    <plurals name="browser_tab_count">
+        <item quantity="one">%d tab</item>
+        <item quantity="other">%d tabs</item>
+    </plurals>
 </resources>

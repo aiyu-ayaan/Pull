@@ -1,6 +1,7 @@
 package com.aiyu.pull.browser
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -69,6 +70,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -114,12 +116,22 @@ fun TabCountButton(count: Int, onClick: () -> Unit) {
                 .size(22.dp)
                 .border(2.dp, MaterialTheme.colorScheme.onSurface, RoundedCornerShape(5.dp)),
         ) {
-            Text(
-                text = if (count > 99) ":D" else "$count",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            androidx.compose.animation.AnimatedContent(
+                targetState = count,
+                transitionSpec = {
+                    val up = targetState > initialState
+                    (androidx.compose.animation.slideInVertically { if (up) it else -it } + androidx.compose.animation.fadeIn()) togetherWith
+                        (androidx.compose.animation.slideOutVertically { if (up) -it else it } + androidx.compose.animation.fadeOut())
+                },
+                label = "tabCount",
+            ) { n ->
+                Text(
+                    text = if (n > 99) ":D" else "$n",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }
@@ -143,12 +155,20 @@ fun BrowserToolbar(
     val haptics = LocalHapticFeedback.current
     val threshold = with(LocalDensity.current) { 72.dp.toPx() }
     var drag by remember { mutableFloatStateOf(0f) }
+    // The gesture detector outlives recompositions; always call the latest callback (it knows the current tab).
+    val swipe by rememberUpdatedState(onSwipeTab)
+    // Follows the finger while dragging, springs back on release.
+    val shownDrag by animateFloatAsState(drag, MaterialTheme.motionScheme.fastSpatialSpec(), label = "swipe")
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.navigationBarsPadding()) {
             val progress by animateFloatAsState(tab.progress / 100f, label = "load")
-            Box(Modifier.fillMaxWidth().height(2.dp)) {
-                if (tab.loading && tab.progress < 100) {
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(2.dp), drawStopIndicator = {})
+            Box(Modifier.fillMaxWidth().height(3.dp)) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = tab.loading && tab.progress < 100,
+                    enter = androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.fadeOut(),
+                ) {
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(3.dp), drawStopIndicator = {})
                 }
             }
             Row(
@@ -162,19 +182,20 @@ fun BrowserToolbar(
                     modifier = Modifier
                         .weight(1f)
                         .height(40.dp)
-                        .offset { IntOffset((drag / 3).roundToInt(), 0) }
-                        .pointerInput(tabCount) {
+                        .offset { IntOffset((shownDrag / 3).roundToInt(), 0) }
+                        .pointerInput(Unit) {
                             detectHorizontalDragGestures(
                                 onDragEnd = {
                                     if (abs(drag) > threshold) {
                                         haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                                        onSwipeTab(if (drag < 0) 1 else -1)
+                                        swipe(if (drag < 0) 1 else -1)
                                     }
                                     drag = 0f
                                 },
                                 onDragCancel = { drag = 0f },
                             ) { change, amount -> change.consume(); drag += amount }
                         }
+                        .clip(CircleShape)
                         .clickable(onClick = onOmnibox),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = Dimens.md)) {
@@ -483,7 +504,7 @@ fun NewTabPage(
                             }
                         }
                         ShortcutTile(
-                            label = stringResource(R.string.browser_add_shortcut),
+                            label = stringResource(R.string.action_add),
                             icon = { Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                             onClick = onAddShortcut,
                             onLongClick = null,

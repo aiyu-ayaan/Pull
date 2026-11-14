@@ -39,12 +39,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,7 +80,7 @@ fun TabSwitcher(
             Row(Modifier.fillMaxWidth().padding(horizontal = Dimens.xs), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_back)) }
                 Text(
-                    stringResource(R.string.browser_tab_count, tabs.size),
+                    pluralStringResource(R.plurals.browser_tab_count, tabs.size, tabs.size),
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -106,15 +110,22 @@ fun TabSwitcher(
 @Composable
 private fun SwipeToClose(onClose: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     var dx by remember { mutableFloatStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
     val limit = with(LocalDensity.current) { 120.dp.toPx() }
+    // Snap to the finger while dragging, spring back (or fly out) once released.
+    val shown by animateFloatAsState(dx, if (dragging) snap() else MaterialTheme.motionScheme.defaultSpatialSpec(), label = "swipe")
     Column(
         modifier
-            .offset { IntOffset(dx.roundToInt(), 0) }
-            .alpha((1f - abs(dx) / (limit * 2)).coerceIn(0.2f, 1f))
+            .offset { IntOffset(shown.roundToInt(), 0) }
+            .alpha((1f - abs(shown) / (limit * 2)).coerceIn(0.2f, 1f))
             .draggable(
                 orientation = Orientation.Horizontal,
                 state = rememberDraggableState { dx += it },
-                onDragStopped = { if (abs(dx) > limit) onClose() else dx = 0f },
+                onDragStarted = { dragging = true },
+                onDragStopped = {
+                    dragging = false
+                    if (abs(dx) > limit) { dx *= 3; onClose() } else dx = 0f
+                },
             ),
     ) { content() }
 }

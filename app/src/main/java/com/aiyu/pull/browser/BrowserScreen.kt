@@ -20,6 +20,18 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.mutableIntStateOf
+import com.aiyu.pull.ui.theme.clickHaptics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -155,6 +167,8 @@ fun BrowserScreen(
     var addShortcut by remember { mutableStateOf<Pair<String, String>?>(null) }
     var showDetectedMedia by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    var swipeDir by remember { mutableIntStateOf(0) }
+    val motion = MaterialTheme.motionScheme
     var longPressTarget by remember { mutableStateOf<LongPressTarget?>(null) }
 
     // WebView callbacks outlive the composition that created them; they reach closeTab through this holder.
@@ -202,7 +216,8 @@ fun BrowserScreen(
 
     var lastPopupTime by remember { mutableLongStateOf(0L) }
 
-    fun select(tab: BrowserTab) {
+    fun select(tab: BrowserTab, dir: Int = 0) {
+        swipeDir = dir
         tabs.find { it.id == activeTabId }?.captureThumbnail()
         tab.lastShown = System.currentTimeMillis()
         activeTabId = tab.id
@@ -275,7 +290,7 @@ fun BrowserScreen(
     BackHandler(enabled = editing) { editing = false }
 
     val tab = activeTab
-    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).imePadding()) {
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).imePadding().clickHaptics()) {
         AnimatedVisibility(refreshId >= 0) {
             Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -305,19 +320,34 @@ fun BrowserScreen(
             )
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (tab != null) {
-                key(tab.id) {
-                    AndroidView(
-                        factory = {
-                            (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
-                            tab.webView.isHapticFeedbackEnabled = false
-                            tab.webView
-                        },
-                        modifier = Modifier.fillMaxSize().then(if (refreshId >= 0) Modifier else Modifier.statusBarsPadding()),
-                    )
-                }
+            // Swiping the omnibox slides pages sideways like Chrome; other switches cross-fade.
+            AnimatedContent(
+                targetState = tab?.id,
+                transitionSpec = {
+                    val dir = swipeDir
+                    if (dir == 0) {
+                        (fadeIn(motion.defaultEffectsSpec()) + scaleIn(motion.defaultSpatialSpec(), initialScale = 0.96f)) togetherWith fadeOut(motion.fastEffectsSpec())
+                    } else {
+                        slideInHorizontally(motion.defaultSpatialSpec()) { it * dir } togetherWith slideOutHorizontally(motion.defaultSpatialSpec()) { -it * dir }
+                    }
+                },
+                label = "tab",
+            ) { id ->
+                val t = tabs.find { it.id == id } ?: return@AnimatedContent
+                AndroidView(
+                    factory = {
+                        (t.webView.parent as? ViewGroup)?.removeView(t.webView)
+                        t.webView.isHapticFeedbackEnabled = false
+                        t.webView
+                    },
+                    modifier = Modifier.fillMaxSize().then(if (refreshId >= 0) Modifier else Modifier.statusBarsPadding()),
+                )
             }
-            if (tab == null || tab.showNtp) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = tab == null || tab.showNtp,
+                enter = fadeIn(motion.defaultEffectsSpec()) + scaleIn(motion.defaultSpatialSpec(), initialScale = 0.94f),
+                exit = fadeOut(motion.fastEffectsSpec()) + scaleOut(motion.fastSpatialSpec(), targetScale = 1.04f),
+            ) {
                 NewTabPage(
                     shortcuts = shortcuts,
                     continueTab = tabs.filter { it.hasPage && !it.showNtp && it.id != tab?.id }.maxByOrNull { it.lastShown }
@@ -335,13 +365,18 @@ fun BrowserScreen(
                 )
             }
             val mediaCount = tab?.detectedMedia?.size ?: 0
-            if (tab != null && !tab.showNtp && mediaCount > 0) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = tab != null && !tab.showNtp && mediaCount > 0,
+                enter = scaleIn(motion.fastSpatialSpec()) + fadeIn(),
+                exit = scaleOut() + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomEnd),
+            ) {
                 Surface(
                     onClick = { showDetectedMedia = true },
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.tertiaryContainer,
                     shadowElevation = 3.dp,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(Dimens.lg),
+                    modifier = Modifier.padding(Dimens.lg),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = Dimens.md, vertical = Dimens.sm)) {
                         Icon(Icons.Rounded.PlayCircle, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
@@ -356,7 +391,12 @@ fun BrowserScreen(
                 }
             }
         }
-        if (tab != null && !tab.showNtp) {
+        AnimatedVisibility(
+            visible = tab != null && !tab.showNtp,
+            enter = slideInVertically(motion.defaultSpatialSpec()) { it } + fadeIn(),
+            exit = slideOutVertically(motion.fastSpatialSpec()) { it } + fadeOut(),
+        ) {
+            if (tab == null) return@AnimatedVisibility
             BrowserToolbar(
                 tab = tab,
                 tabCount = tabs.size,
@@ -367,14 +407,21 @@ fun BrowserScreen(
                 onTabs = { tab.captureThumbnail(); showTabs = true },
                 onSwipeTab = { dir ->
                     val i = tabs.indexOfFirst { it.id == tab.id } + dir
-                    if (i in tabs.indices) select(tabs[i])
+                    if (i in tabs.indices) {
+                        select(tabs[i], dir)
+                    }
                 },
                 menu = menu,
             )
         }
     }
 
-    if (showTabs) {
+    // Chrome zooms out of the page into the grid.
+    AnimatedVisibility(
+        visible = showTabs,
+        enter = fadeIn(motion.defaultEffectsSpec()) + scaleIn(motion.defaultSpatialSpec(), initialScale = 1.1f),
+        exit = fadeOut(motion.fastEffectsSpec()) + scaleOut(motion.fastSpatialSpec(), targetScale = 1.1f),
+    ) {
         TabSwitcher(
             tabs = tabs,
             activeTabId = activeTabId,
@@ -391,7 +438,11 @@ fun BrowserScreen(
         )
     }
 
-    if (editing) {
+    AnimatedVisibility(
+        visible = editing,
+        enter = fadeIn(motion.fastEffectsSpec()) + slideInVertically(motion.defaultSpatialSpec()) { it / 12 },
+        exit = fadeOut(motion.fastEffectsSpec()) + slideOutVertically(motion.fastSpatialSpec()) { it / 12 },
+    ) {
         OmniboxEditor(
             initial = if (tab != null && !tab.showNtp && tab.hasPage) tab.url else "",
             history = history,
