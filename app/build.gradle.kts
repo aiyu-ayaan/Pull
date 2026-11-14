@@ -58,7 +58,8 @@ android {
             isEnable = true
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
-            isUniversalApk = false
+            // -PuniversalApk adds app-universal-release.apk (every ABI in one file) for the release workflow.
+            isUniversalApk = project.hasProperty("universalApk")
         }
     }
 

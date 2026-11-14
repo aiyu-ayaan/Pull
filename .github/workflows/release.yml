@@ -51,6 +51,11 @@ on:
         default: alpha
         type: choice
         options: [alpha, beta, stable, fix, feat, major]
+      universal:
+        description: 'Also attach the universal APK (all ABIs in one file, much larger). Release and patch modes; push-triggered releases always include it.'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -353,7 +358,11 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           PULL_BUILD: ${{ needs.merged.outputs.build }}
-        run: ./gradlew :app:assembleRelease --stacktrace
+          UNIVERSAL: ${{ github.event_name != 'workflow_dispatch' || inputs.universal }}
+        run: |
+          flags=""
+          [ "$UNIVERSAL" = true ] && flags="-PuniversalApk"
+          ./gradlew :app:assembleRelease $flags --stacktrace
 
       # app-arm64-v8a-release.apk says nothing about which release it is once it
       # has been downloaded. Name it after the version and the ABI.
@@ -368,6 +377,10 @@ jobs:
             test -f "$src" || { echo "::error::$abi APK missing (unsigned? check the keystore secrets)"; exit 1; }
             cp "$src" "$RUNNER_TEMP/android/Pull-${VERSION}-${abi}.apk"
           done
+          # Not an ABI, so the in-app updater (Releases.apkFor) never picks it.
+          if [ -f app/build/outputs/apk/release/app-universal-release.apk ]; then
+            cp app/build/outputs/apk/release/app-universal-release.apk "$RUNNER_TEMP/android/Pull-${VERSION}-universal.apk"
+          fi
           ls -la "$RUNNER_TEMP/android"
 
       - uses: actions/upload-artifact@v4
@@ -427,6 +440,7 @@ jobs:
             - `Pull-${{ needs.merged.outputs.version }}-arm64-v8a.apk` — almost every current phone
             - `Pull-${{ needs.merged.outputs.version }}-armeabi-v7a.apk` — older 32-bit phones
             - `Pull-${{ needs.merged.outputs.version }}-x86_64.apk` / `-x86.apk` — emulators and Chromebooks
+            - `Pull-${{ needs.merged.outputs.version }}-universal.apk` — every CPU in one file, if unsure (larger download, when attached)
 
             Once installed, Pull updates itself: **Settings → Updates** picks the right APK for the device.
           files: artifacts/android/*
