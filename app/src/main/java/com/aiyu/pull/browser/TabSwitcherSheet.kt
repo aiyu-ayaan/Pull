@@ -91,7 +91,8 @@ fun TabSwitcher(
             }
             LazyVerticalGrid(
                 state = grid,
-                columns = GridCells.Adaptive(150.dp),
+                // Bigger cards on tablets so the previews are readable.
+                columns = GridCells.Adaptive(if (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600) 260.dp else 150.dp),
                 contentPadding = PaddingValues(Dimens.md),
                 horizontalArrangement = Arrangement.spacedBy(Dimens.md),
                 verticalArrangement = Arrangement.spacedBy(Dimens.md),
@@ -156,6 +157,8 @@ private fun TabCard(tab: BrowserTab, active: Boolean, onClick: () -> Unit, onClo
                 Icon(Icons.Rounded.Close, stringResource(R.string.browser_close_tab), Modifier.size(18.dp))
             }
         }
-        TabPreview(tab, Modifier.fillMaxWidth().aspectRatio(0.78f).padding(start = Dimens.xs, end = Dimens.xs, bottom = Dimens.xs))
+        // Same shape as the page, so landscape tablets get wide previews instead of tall slivers.
+        val ratio = tab.thumbnail?.let { it.width.toFloat() / it.height } ?: 0.78f
+        TabPreview(tab, Modifier.fillMaxWidth().aspectRatio(ratio.coerceIn(0.5f, 2f)).padding(start = Dimens.xs, end = Dimens.xs, bottom = Dimens.xs))
     }
 }

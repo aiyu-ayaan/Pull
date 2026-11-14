@@ -22,6 +22,44 @@ It also downloads torrents and video-site links, and has its own browser.
 > Pull is in alpha. There are no benchmark numbers yet, so this README makes no speed claim
 > against other download managers. The method for measuring one is in [`08-benchmarking.md`](development/docs/08-benchmarking.md).
 
+## Screenshots
+
+### Phone
+
+<p align="center">
+  <img src="docs/screenshots/phone/active.png" width="200" alt="Active tab: total speed graph and two running downloads">
+  <img src="docs/screenshots/phone/details.png" width="200" alt="Download details: progress, transfer rate, connections and the connection map">
+  <img src="docs/screenshots/phone/downloaded.png" width="200" alt="Downloaded tab: finished files grouped by day">
+  <img src="docs/screenshots/phone/add.png" width="200" alt="Add sheet: size, resume support, file name and connection count">
+</p>
+<p align="center">
+  <img src="docs/screenshots/phone/drawer.png" width="200" alt="Side drawer with add link, open torrent, browser and settings">
+  <img src="docs/screenshots/phone/settings.png" width="200" alt="Settings home with one page per category">
+  <img src="docs/screenshots/phone/browser-home.png" width="200" alt="Browser new tab page with shortcut tiles">
+  <img src="docs/screenshots/phone/browser-continue.png" width="200" alt="New tab page with the continue-with-this-tab card">
+</p>
+<p align="center">
+  <img src="docs/screenshots/phone/browser-page.png" width="200" alt="Browser page with the bottom toolbar">
+  <img src="docs/screenshots/phone/browser-search.png" width="200" alt="Full-screen address bar search with history matches">
+  <img src="docs/screenshots/phone/browser-tabs.png" width="200" alt="Tab grid with page previews">
+</p>
+
+### Tablet
+
+<p align="center">
+  <img src="docs/screenshots/tablet/active-details.png" width="640" alt="Tablet: navigation rail, active downloads list and the details pane side by side">
+</p>
+<p align="center">
+  <img src="docs/screenshots/tablet/downloaded.png" width="400" alt="Tablet: finished downloads with details pane">
+  <img src="docs/screenshots/tablet/browser.png" width="400" alt="Tablet browser: tab strip and toolbar on top">
+</p>
+<p align="center">
+  <img src="docs/screenshots/tablet/browser-home.png" width="400" alt="Tablet browser new tab page">
+  <img src="docs/screenshots/tablet/browser-tabs.png" width="400" alt="Tablet tab grid with wide page previews">
+</p>
+
+<sub>Captured on the Android emulator from a debug build, with test files served from a local server.</sub>
+
 ## What it does
 
 ### Segmented HTTP & HTTPS engine (`:engine`)
@@ -45,9 +83,10 @@ Links to supported video sites go through `yt-dlp` (with bundled FFmpeg and `ari
 
 ### Built-in browser & Ad Shield
 A multi-tab WebView browser running in its own task with built-in media sniffing, download interception, and a three-layer content shield:
-- **Tabs, incognito & start page.** Independent tabs with separate navigation history, a tab switcher grid, incognito mode (isolated storage and no history recording), a customizable start page with quick-launch shortcuts, and Room-backed **History** and **Bookmarks**.
-- **Search & desktop mode.** Configurable search engine selector with live address-bar autocomplete suggestions, plus a per-tab **Desktop site** user-agent toggle.
-- **Smart download capture.** Long-press any link or image to **Download with Pull**, automatically intercept file links by extension, capture `blob:` and `POST` form downloads via an injected JS bridge, and detect streaming or embedded media (`m3u8`, `mpd`, `mp4`, `webm`, `mkv`, `mp3`, `m4a`) via the live **"N media" Sniffer** chip.
+- **Chrome-style layout.** On phones a bottom toolbar (home, address bar, new tab, tab count, menu) with the load progress along its top edge; swipe the address bar sideways to switch tabs. On tablets a tab strip and toolbar sit on top, as in Chrome for tablets. Back goes to the previous page first, then to the tab that opened the current one.
+- **Tabs, incognito & start page.** Independent tabs with separate navigation history, a full-screen tab grid with page previews (swipe a card to close it), incognito mode (isolated storage and no history recording), and a new tab page with shortcut tiles (site icons; long-press to remove), an **Add** tile and a *Continue with this tab* card. Room-backed **History** and **Bookmarks**.
+- **Search & desktop mode.** Tapping the address bar opens a full-screen search with recent history and live bookmark/history matches (long-press one to add it as a shortcut), using the configured search engine, plus a per-tab **Desktop site** user-agent toggle.
+- **Smart download capture.** Long-press any link or image to **Download with Pull**, intercept file links by extension (Pull asks the server first, so a `.zip` link that is really a landing page opens as a page instead of a video prompt), capture `blob:` and `POST` form downloads via an injected JS bridge, and detect streaming or embedded media (`m3u8`, `mpd`, `mp4`, `webm`, `mkv`, `mp3`, `m4a`) via the live **"N media" Sniffer** chip.
 - **Ad, popup & cosmetic Shield.** Intercepts ad and tracker requests in `shouldInterceptRequest`, blocks unprompted `window.open` popups and spam redirects, and injects CSS cosmetic rules to collapse empty ad slots and click-jack overlays—all controllable via the per-page **Shield panel** with blocked counters and a **per-site allowlist**.
 
 ### Batching, scheduling & backup
@@ -56,15 +95,21 @@ A multi-tab WebView browser running in its own task with built-in media sniffing
 - **JSON backup & restore.** Export and import app settings, browser bookmarks, and start-page shortcuts as portable JSON files.
 
 ### Add a download
-Paste a URL, expand a batch pattern, open a link with Pull, or **share** to it from any app via the modal bottom sheet. Pull checks for duplicates before queuing the same file twice.
+Tap **Add link** (the link on your clipboard is filled in), expand a batch pattern, open a link with Pull, or **share** to it from any app via the modal bottom sheet. Pull checks for duplicates before queuing the same file twice.
 
 ### Foreground service
 Downloads run in a foreground service with `specialUse` on Android 14 and up, because Android 15 limits
-`dataSync` services to six hours. Notifications show progress and have a pause-all action.
+`dataSync` services to six hours. Notifications show progress and have a pause-all action. A wake lock (renewed while
+the service runs) and a Wi-Fi lock keep a download moving with the screen off, and network drops or server errors put
+the download back in the queue with backoff instead of failing it.
 
 ### Look and feel
-Material 3 Expressive with dynamic color, light and dark themes, and shape-morphing components. The design follows the
-sibling apps [Rewire](https://github.com/aiyu-ayaan/Rewire), Findex and Domus.
+Material 3 Expressive with dynamic color, light and dark themes, shape-morphing components and spring motion. The
+design follows the sibling apps [Rewire](https://github.com/aiyu-ayaan/Rewire), Findex and Domus.
+
+Layouts adapt to the window: phones get a floating tab pill; from 600dp the app switches to a docked navigation rail
+with the drawer button and add button in its header; from 920dp the download list and the details pane sit side by
+side. Content keeps a readable width on wide screens.
 
 ### Privacy
 No accounts and no telemetry. The browser never continues past an SSL error.
