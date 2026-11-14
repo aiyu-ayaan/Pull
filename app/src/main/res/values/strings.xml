@@ -66,7 +66,6 @@
     <string name="empty_filtered">Nothing here</string>
     <string name="empty_body">Add a link, paste one, or open the browser and tap any download.</string>
     <string name="fab_add_url">Add link</string>
-    <string name="fab_paste">Paste link</string>
     <string name="fab_browser">Open browser</string>
     <string name="cd_add_menu">Add download</string>
     <string name="snackbar_removed">Removed %s</string>

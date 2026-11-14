@@ -12,7 +12,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.AddLink
-import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.Public
@@ -38,7 +37,6 @@ import com.aiyu.pull.ui.theme.Dimens
 fun PullDrawerSheet(
     settingsOpen: Boolean,
     onAddLink: () -> Unit,
-    onPaste: () -> Unit,
     onOpenTorrent: () -> Unit,
     onBrowser: () -> Unit,
     onSettings: () -> Unit,
@@ -64,7 +62,6 @@ fun PullDrawerSheet(
         // Only what the tab bar does not have: the tabs live in the bar, never twice.
         Section(R.string.drawer_section_add)
         Item(Icons.Rounded.AddLink, stringResource(R.string.fab_add_url), onClick = onAddLink)
-        Item(Icons.Rounded.ContentPaste, stringResource(R.string.fab_paste), onClick = onPaste)
         Item(Icons.Rounded.FileOpen, stringResource(R.string.drawer_open_torrent), onClick = onOpenTorrent)
         Item(
             Icons.Rounded.Public, stringResource(R.string.nav_browser), onClick = onBrowser,

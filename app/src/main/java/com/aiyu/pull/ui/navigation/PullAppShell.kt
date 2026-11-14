@@ -138,8 +138,7 @@ fun PullAppShell(event: AppEvent?, onEventHandled: () -> Unit) {
         drawerContent = {
             PullDrawerSheet(
                 settingsOpen = onSettings,
-                onAddLink = { closeDrawer(); adding = AddRequest() },
-                onPaste = { closeDrawer(); addFromClipboard() },
+                onAddLink = { closeDrawer(); addFromClipboard() },
                 onOpenTorrent = { closeDrawer(); pickTorrent.launch(arrayOf("application/x-bittorrent", "application/octet-stream")) },
                 onBrowser = { closeDrawer(); openBrowser(null, -1) },
                 onSettings = { closeDrawer(); nav.navigate(SettingsRoute) { launchSingleTop = true } },

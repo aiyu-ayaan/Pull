@@ -41,7 +41,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.LinkOff
@@ -305,14 +304,9 @@ fun DownloadsScreen(
                     },
                 ) {
                     FloatingActionButtonMenuItem(
-                        onClick = { menuOpen = false; onAdd(false) },
+                        onClick = { menuOpen = false; onAdd(true) },
                         icon = { Icon(Icons.Rounded.Add, null) },
                         text = { Text(stringResource(R.string.fab_add_url)) },
-                    )
-                    FloatingActionButtonMenuItem(
-                        onClick = { menuOpen = false; onAdd(true) },
-                        icon = { Icon(Icons.Rounded.ContentPaste, null) },
-                        text = { Text(stringResource(R.string.fab_paste)) },
                     )
                     FloatingActionButtonMenuItem(
                         onClick = { menuOpen = false; onBrowser() },
