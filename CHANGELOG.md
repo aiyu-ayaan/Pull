@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.0.0](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.6...v1.0.0) (2026-11-14)
+
+### ⚠ Breaking changes
+
+* Ship 27 languages with a per-app language picker
+
+### Features
+
+* Add support for universal APK in release workflow
+* Docked M3 navigation rail on tablets, pane-aware gutters, comet logo in drawer
+* Tablet layouts for the browser; fix rail shape and badge
+* Merge Add link and Paste link into one action
+* Animate tab switches, overlays and toolbar
+* Chrome-style layout, history omnibox and tab previews
+
+### Bug fixes
+
+* Clip the WebView host so it cannot draw over the tablet toolbar
+* Stop offering yt-dlp for file links that are landing pages
+* Survive overnight network drops instead of failing
+
+### Other changes
+
+* I18n: add translations for 26 locales matching Rewire
+* I18n: extract strings and add per-app locale support
+* Group phone screenshots by topic; drop alpha benchmark note
+* Phone and tablet screenshots in the README; tablet-sized tab grid
+* Update README with full engine, torrent, browser, and automation features
+
 ## [0.1.1-alpha.6](https://github.com/aiyu-ayaan/Pull/compare/v0.1.1-alpha.5...v0.1.1-alpha.6) (2026-11-13)
 
 ### Features
