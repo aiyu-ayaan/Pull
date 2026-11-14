@@ -37,6 +37,8 @@ class BrowserActivity : ComponentActivity() {
     /** Bumped by every new launch intent so the page restarts at the requested URL. */
     private var launch by mutableIntStateOf(0)
 
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(com.aiyu.pull.data.AppLocale.wrap(base))
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

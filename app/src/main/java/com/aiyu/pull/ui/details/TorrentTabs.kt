@@ -494,8 +494,9 @@ private fun PieceGrid(pieces: BooleanArray) {
     val cols = 32
     val rows = (pieces.size + cols - 1) / cols
     val have = pieces.count { it }
+    val desc = stringResource(R.string.cd_piece_groups, have, pieces.size)
     Canvas(
-        Modifier.fillMaxWidth().height((rows * 10).dp).semantics { contentDescription = "$have of ${pieces.size} piece groups downloaded" },
+        Modifier.fillMaxWidth().height((rows * 10).dp).semantics { contentDescription = desc },
     ) {
         val cell = size.width / cols
         val gap = 1.5.dp.toPx()
@@ -704,11 +705,11 @@ fun LimitsDialog(down: Int, up: Int, onDismiss: () -> Unit, onApply: (Int, Int) 
                 Text(stringResource(R.string.limits_hint), style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(
                     d, { d = it.filter(Char::isDigit) }, label = { Text(stringResource(R.string.limit_down)) },
-                    suffix = { Text("KB/s") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    suffix = { Text(stringResource(R.string.unit_kb_s)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
                 OutlinedTextField(
                     u, { u = it.filter(Char::isDigit) }, label = { Text(stringResource(R.string.limit_up)) },
-                    suffix = { Text("KB/s") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    suffix = { Text(stringResource(R.string.unit_kb_s)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
             }
         },

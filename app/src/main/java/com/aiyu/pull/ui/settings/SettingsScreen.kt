@@ -2,6 +2,7 @@ package com.aiyu.pull.ui.settings
 
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.SmartDisplay
@@ -73,6 +75,7 @@ import androidx.graphics.shapes.RoundedPolygon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aiyu.pull.BuildConfig
 import com.aiyu.pull.R
+import com.aiyu.pull.data.AppLocale
 import com.aiyu.pull.data.Encryption
 import com.aiyu.pull.data.SearchEngine
 import com.aiyu.pull.data.Settings
@@ -104,6 +107,7 @@ enum class SettingsPage(val title: Int, val summary: Int, val onHome: Boolean = 
     VIDEO(R.string.settings_video, R.string.settings_video_summary),
     BROWSER(R.string.settings_browser, R.string.settings_browser_summary),
     APPEARANCE(R.string.settings_appearance, R.string.settings_appearance_summary),
+    LANGUAGE(R.string.settings_language, R.string.settings_language_summary, onHome = false),
     UPDATES(R.string.settings_updates, R.string.settings_updates_summary),
     ABOUT(R.string.settings_about, R.string.settings_about_summary),
     ACKNOWLEDGEMENTS(R.string.about_acknowledgements, R.string.about_acknowledgements_desc, onHome = false),
@@ -120,6 +124,7 @@ private fun SettingsPage.look(): PageLook {
         SettingsPage.VIDEO -> PageLook(Icons.Rounded.SmartDisplay, MaterialShapes.Sunny, c.secondaryContainer, c.onSecondaryContainer)
         SettingsPage.BROWSER -> PageLook(Icons.Rounded.Public, MaterialShapes.Flower, c.tertiaryContainer, c.onTertiaryContainer)
         SettingsPage.APPEARANCE -> PageLook(Icons.Rounded.Palette, MaterialShapes.Cookie7Sided, c.primaryContainer, c.onPrimaryContainer)
+        SettingsPage.LANGUAGE -> PageLook(Icons.Rounded.Language, MaterialShapes.Cookie7Sided, c.primaryContainer, c.onPrimaryContainer)
         SettingsPage.UPDATES -> PageLook(Icons.Rounded.SystemUpdate, MaterialShapes.Gem, c.secondaryContainer, c.onSecondaryContainer)
         SettingsPage.ABOUT, SettingsPage.ACKNOWLEDGEMENTS -> PageLook(Icons.Rounded.Info, MaterialShapes.Circle, c.surfaceContainerHighest, c.onSurfaceVariant)
     }
@@ -162,7 +167,8 @@ fun SettingsPageScreen(page: SettingsPage, vm: SettingsViewModel, onBack: () -> 
             SettingsPage.TORRENTS -> torrents(settings, vm)
             SettingsPage.VIDEO -> video(settings, vm)
             SettingsPage.BROWSER -> browser(settings, vm)
-            SettingsPage.APPEARANCE -> appearance(settings, vm)
+            SettingsPage.APPEARANCE -> appearance(settings, vm, onOpenLanguage = { onPage(SettingsPage.LANGUAGE) })
+            SettingsPage.LANGUAGE -> language()
             SettingsPage.UPDATES -> updates()
             SettingsPage.ABOUT -> about(onOpenAcknowledgements = { onPage(SettingsPage.ACKNOWLEDGEMENTS) })
             SettingsPage.ACKNOWLEDGEMENTS -> acknowledgements()
@@ -183,18 +189,18 @@ private fun LazyListScope.downloads(s: Settings, vm: SettingsViewModel) {
         }
     }
     item {
-        SectionText("Network / Schedule") {
-            SwitchItemText(
-                title = "Download schedule",
-                hint = "Auto-start queued downloads during the scheduled window and pause outside it",
+        Section(R.string.settings_section_schedule) {
+            SwitchItem(
+                title = R.string.settings_schedule,
+                hint = R.string.settings_schedule_hint,
                 checked = s.scheduleEnabled,
             ) { on -> vm.update { setScheduleEnabled(on) } }
             HourPickerItem(
-                title = "Start hour",
+                title = R.string.settings_schedule_start,
                 hour = s.scheduleStartHour,
             ) { h -> vm.update { setScheduleStartHour(h) } }
             HourPickerItem(
-                title = "End hour",
+                title = R.string.settings_schedule_end,
                 hour = s.scheduleEndHour,
             ) { h -> vm.update { setScheduleEndHour(h) } }
         }
@@ -423,7 +429,7 @@ private fun LazyListScope.browser(s: Settings, vm: SettingsViewModel) {
     }
 }
 
-private fun LazyListScope.appearance(s: Settings, vm: SettingsViewModel) {
+private fun LazyListScope.appearance(s: Settings, vm: SettingsViewModel, onOpenLanguage: () -> Unit) {
     item {
         Section(R.string.settings_theme) {
             Row(
@@ -448,6 +454,41 @@ private fun LazyListScope.appearance(s: Settings, vm: SettingsViewModel) {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 SwitchItem(R.string.settings_dynamic, R.string.settings_dynamic_hint, s.dynamicColor, vm::setDynamicColor)
+            }
+        }
+    }
+    item {
+        Section(R.string.settings_language) {
+            val context = LocalContext.current
+            val current = AppLocale.current(context)
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_language)) },
+                supportingContent = { Text(if (current.isEmpty()) stringResource(R.string.settings_language_system) else AppLocale.nativeName(current)) },
+                leadingContent = { Icon(Icons.Rounded.Language, null) },
+                trailingContent = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) },
+                colors = itemColors(),
+                modifier = Modifier.clickable(onClick = onOpenLanguage),
+            )
+        }
+    }
+}
+
+private fun LazyListScope.language() {
+    item {
+        val activity = LocalActivity.current
+        val current = AppLocale.current(LocalContext.current)
+        Group {
+            (listOf("") + AppLocale.tags).forEach { tag ->
+                ListItem(
+                    headlineContent = {
+                        Text(if (tag.isEmpty()) stringResource(R.string.settings_language_system) else AppLocale.nativeName(tag))
+                    },
+                    trailingContent = { RadioButton(selected = tag == current, onClick = null) },
+                    colors = itemColors(),
+                    modifier = Modifier.selectable(selected = tag == current, role = Role.RadioButton) {
+                        if (tag != current) activity?.let { AppLocale.set(it, tag) }
+                    },
+                )
             }
         }
     }
@@ -508,24 +549,13 @@ internal fun SectionText(title: String, content: @Composable () -> Unit) {
     }
 }
 
-@Composable
-private fun SwitchItemText(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(hint) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
-        colors = itemColors(),
-        modifier = Modifier.clickable(role = Role.Switch) { onChange(!checked) },
-    )
-}
-
-private fun formatHour(hour: Int): String = String.format("%02d:00", hour.coerceIn(0, 23))
+private fun formatHour(hour: Int): String = String.format(java.util.Locale.getDefault(), "%02d:00", hour.coerceIn(0, 23))
 
 @Composable
-private fun HourPickerItem(title: String, hour: Int, onPick: (Int) -> Unit) {
+private fun HourPickerItem(title: Int, hour: Int, onPick: (Int) -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
     ListItem(
-        headlineContent = { Text(title) },
+        headlineContent = { Text(stringResource(title)) },
         supportingContent = { Text(formatHour(hour)) },
         colors = itemColors(),
         modifier = Modifier.clickable { open = true },
@@ -533,7 +563,7 @@ private fun HourPickerItem(title: String, hour: Int, onPick: (Int) -> Unit) {
     if (open) {
         AlertDialog(
             onDismissRequest = { open = false },
-            title = { Text(title) },
+            title = { Text(stringResource(title)) },
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()).selectableGroup()) {
                     (0..23).forEach { h ->
@@ -568,10 +598,14 @@ private fun BackupRestoreSection(vm: SettingsViewModel) {
                     val json = vm.exportBackupJson()
                     context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(json) }
                 }.onSuccess {
-                    statusText = "Backup exported"
-                    Toast.makeText(context, "Backup exported", Toast.LENGTH_SHORT).show()
+                    val msg = context.getString(R.string.settings_backup_exported)
+                    statusText = msg
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }.onFailure { e ->
-                    statusText = "Export failed: ${e.message ?: "error"}"
+                    statusText = context.getString(
+                        R.string.settings_backup_export_failed,
+                        e.message ?: context.getString(R.string.settings_backup_error),
+                    )
                 }
             }
         }
@@ -586,26 +620,33 @@ private fun BackupRestoreSection(vm: SettingsViewModel) {
                     val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
                     vm.importBackupJson(json)
                 }.onSuccess { data ->
-                    val msg = "Restored settings, ${data.bookmarks.size} bookmarks & ${data.shortcuts.size} shortcuts"
+                    val msg = context.getString(
+                        R.string.settings_backup_restored,
+                        data.bookmarks.size,
+                        data.shortcuts.size,
+                    )
                     statusText = msg
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }.onFailure { e ->
-                    statusText = "Import failed: ${e.message ?: "invalid JSON"}"
+                    statusText = context.getString(
+                        R.string.settings_backup_import_failed,
+                        e.message ?: context.getString(R.string.settings_backup_invalid_json),
+                    )
                 }
             }
         }
     }
 
-    SectionText("Backup & restore") {
+    Section(R.string.settings_section_backup) {
         ActionItem(
-            title = "Export backup",
-            hint = statusText ?: "Save settings, bookmarks and shortcuts as JSON",
+            title = stringResource(R.string.settings_backup_export),
+            hint = statusText ?: stringResource(R.string.settings_backup_export_hint),
         ) {
             exportLauncher.launch("pull-backup.json")
         }
         ActionItem(
-            title = "Import backup",
-            hint = "Restore settings, bookmarks and shortcuts from JSON",
+            title = stringResource(R.string.settings_backup_import),
+            hint = stringResource(R.string.settings_backup_import_hint),
         ) {
             importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
         }
@@ -727,7 +768,7 @@ private fun LimitItem(title: Int, kb: Int, onChange: (Int) -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
     ListItem(
         headlineContent = { Text(stringResource(title)) },
-        supportingContent = { Text(if (kb > 0) "$kb KB/s" else stringResource(R.string.limit_unlimited)) },
+        supportingContent = { Text(if (kb > 0) "$kb ${stringResource(R.string.unit_kb_s)}" else stringResource(R.string.limit_unlimited)) },
         colors = itemColors(),
         modifier = Modifier.clickable { open = true },
     )
@@ -740,7 +781,7 @@ private fun LimitItem(title: Int, kb: Int, onChange: (Int) -> Unit) {
                 Column(verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
                     Text(stringResource(R.string.limits_hint), style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(
-                        text, { text = it.filter(Char::isDigit).take(7) }, suffix = { Text("KB/s") }, singleLine = true,
+                        text, { text = it.filter(Char::isDigit).take(7) }, suffix = { Text(stringResource(R.string.unit_kb_s)) }, singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
                 }

@@ -1,5 +1,8 @@
 package com.aiyu.pull.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.aiyu.pull.R
 import java.util.Locale
 import kotlin.math.abs
 
@@ -31,6 +34,9 @@ fun etaSeconds(remaining: Long, bytesPerSecond: Long): Long? =
     if (remaining > 0 && bytesPerSecond > 0) remaining / bytesPerSecond else null
 
 /** Spoken form for TalkBack: "4.2 megabytes per second". */
+@Composable
 fun speakSpeed(bytesPerSecond: Long): String = formatSpeed(bytesPerSecond)
-    .replace("KB/s", "kilobytes per second").replace("MB/s", "megabytes per second")
-    .replace("GB/s", "gigabytes per second").replace("B/s", "bytes per second")
+    .replace("KB/s", stringResource(R.string.speak_kb_s))
+    .replace("MB/s", stringResource(R.string.speak_mb_s))
+    .replace("GB/s", stringResource(R.string.speak_gb_s))
+    .replace("B/s", stringResource(R.string.speak_b_s))

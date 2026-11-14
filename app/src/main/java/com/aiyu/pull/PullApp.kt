@@ -18,6 +18,13 @@ class PullApp : Application() {
     @Inject lateinit var settings: SettingsRepository
     @Inject lateinit var videos: VideoEngine
 
+    override fun attachBaseContext(base: android.content.Context) = super.attachBaseContext(com.aiyu.pull.data.AppLocale.wrap(base))
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        notifier.createChannels() // API 33+: re-localize notification channel names on language change
+    }
+
     override fun onCreate() {
         super.onCreate()
         notifier.createChannels()

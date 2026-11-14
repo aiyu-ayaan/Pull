@@ -25,6 +25,8 @@ import dagger.hilt.android.AndroidEntryPoint
 class QuickDownloadActivity : ComponentActivity() {
     private val settingsVm: SettingsViewModel by viewModels()
 
+    override fun attachBaseContext(base: android.content.Context) = super.attachBaseContext(com.aiyu.pull.data.AppLocale.wrap(base))
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

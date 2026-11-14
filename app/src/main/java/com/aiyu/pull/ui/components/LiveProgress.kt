@@ -25,9 +25,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import com.aiyu.pull.R
 import androidx.compose.ui.unit.dp
 import com.aiyu.pull.engine.SegmentProgress
 import com.aiyu.pull.ui.theme.PullMotion
@@ -70,9 +72,10 @@ fun SegmentMap(
 ) {
     val c = MaterialTheme.colorScheme
     val active = segments.count { it.active }
+    val desc = stringResource(R.string.cd_connections_downloading, active)
     Canvas(
         modifier.fillMaxWidth().height(height).semantics {
-            contentDescription = "$active connections downloading"
+            contentDescription = desc
         },
     ) {
         val r = CornerRadius(size.height / 2)
@@ -106,9 +109,10 @@ fun SegmentMap(
 fun PieceMap(pieces: BooleanArray, complete: Boolean, modifier: Modifier = Modifier, height: Dp = 20.dp) {
     val c = MaterialTheme.colorScheme
     val have = pieces.count { it }
+    val desc = stringResource(R.string.cd_piece_groups, have, pieces.size)
     Canvas(
         modifier.fillMaxWidth().height(height).semantics {
-            contentDescription = "$have of ${pieces.size} piece groups downloaded"
+            contentDescription = desc
         },
     ) {
         val r = CornerRadius(size.height / 2)

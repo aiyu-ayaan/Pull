@@ -63,9 +63,17 @@ android {
         }
     }
 
-    // Pull is English-only: drop the translations every library ships.
+    // Ship only the languages Pull is translated into (see AppLocale.tags); drops other library translations.
     androidResources {
-        localeFilters += listOf("en")
+        localeFilters += listOf("en", "hi", "es", "pt", "in", "ar", "fr", "ru", "de", "tr", "ja", "ko", "it", "vi", "th", "zh", "pl", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "ur")
+        generateLocaleConfig = true // manifest localeConfig built from the values-* folders: powers Settings → App languages
+    }
+
+    // The app switches language at runtime, so Play must ship every language in one APK set, not split by device locale.
+    bundle {
+        language {
+            enableSplit = false
+        }
     }
 
     signingConfigs {

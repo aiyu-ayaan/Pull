@@ -261,10 +261,11 @@ fun DownloadsScreen(
                             AnimatedContent(active > 0, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "subtitle") { busy ->
                                 if (busy) {
                                     val speed by rememberGlide(totalSpeed)
+                                    val speedDesc = speakSpeed(totalSpeed)
                                     Text(
                                         pluralStringResource(R.plurals.downloads_subtitle_active, active, formatSpeed(speed), active),
                                         color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.semantics { contentDescription = speakSpeed(totalSpeed) },
+                                        modifier = Modifier.semantics { contentDescription = speedDesc },
                                     )
                                 } else {
                                     val n = views.count { tab.matches(it.entity.status) }
@@ -708,11 +709,12 @@ private fun LiveHero(running: List<DownloadView>, modifier: Modifier = Modifier)
     val history = List(length) { i -> histories.sumOf { h -> h.getOrNull(h.size - length + i) ?: 0L } }
     Surface(shape = MaterialTheme.shapes.extraLarge, color = c.primaryContainer, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.xl)) {
+            val speedDesc = speakSpeed(speed)
             Text(
                 formatSpeed(speed),
                 style = NumberTextStyle,
                 color = c.onPrimaryContainer,
-                modifier = Modifier.semantics { contentDescription = speakSpeed(speed) },
+                modifier = Modifier.semantics { contentDescription = speedDesc },
             )
             Text(
                 pluralStringResource(R.plurals.live_summary, running.size, running.size, connections),

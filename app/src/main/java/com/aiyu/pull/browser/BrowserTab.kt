@@ -105,7 +105,7 @@ class BrowserTab(
             url.isNotBlank() && url != "about:blank" -> runCatching {
                 Uri.parse(url).host ?: url
             }.getOrDefault(url)
-            else -> "New tab"
+            else -> webView.context.getString(com.aiyu.pull.R.string.browser_new_tab)
         }
 
     fun destroy() {

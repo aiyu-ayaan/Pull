@@ -537,4 +537,57 @@
         <item quantity="one">%d tab</item>
         <item quantity="other">%d tabs</item>
     </plurals>
+
+    <!-- Language & i18n -->
+    <string name="settings_language">Language</string>
+    <string name="settings_language_summary">App language</string>
+    <string name="settings_language_system">Follow system</string>
+
+    <!-- Settings: Schedule & Backup -->
+    <string name="settings_section_schedule">Network / Schedule</string>
+    <string name="settings_schedule">Download schedule</string>
+    <string name="settings_schedule_hint">Auto-start queued downloads during the scheduled window and pause outside it</string>
+    <string name="settings_schedule_start">Start hour</string>
+    <string name="settings_schedule_end">End hour</string>
+    <string name="settings_section_backup">Backup &amp; restore</string>
+    <string name="settings_backup_export">Export backup</string>
+    <string name="settings_backup_export_hint">Save settings, bookmarks and shortcuts as JSON</string>
+    <string name="settings_backup_exported">Backup exported</string>
+    <string name="settings_backup_export_failed">Export failed: %1$s</string>
+    <string name="settings_backup_import">Import backup</string>
+    <string name="settings_backup_import_hint">Restore settings, bookmarks and shortcuts from JSON</string>
+    <string name="settings_backup_restored">Restored settings, %1$d bookmarks &amp; %2$d shortcuts</string>
+    <string name="settings_backup_import_failed">Import failed: %1$s</string>
+    <string name="settings_backup_error">error</string>
+    <string name="settings_backup_invalid_json">invalid JSON</string>
+    <string name="unit_kb_s">KB/s</string>
+
+    <!-- Add sheet & Video -->
+    <string name="add_import_txt">Import .txt URL list</string>
+    <plurals name="add_batch_count">
+        <item quantity="one">Batch: %1$d URL</item>
+        <item quantity="other">Batch: %1$d URLs</item>
+    </plurals>
+    <string name="add_advanced_title">Advanced (Mirrors &amp; Checksum)</string>
+    <string name="add_mirrors_label">Mirror URLs (one per line)</string>
+    <string name="add_checksum_label">Expected Checksum (MD5 / SHA-256)</string>
+    <string name="add_checksum_placeholder">MD5 (32 hex) or SHA-256 (64 hex)</string>
+    <string name="video_resolution_p">%1$dp</string>
+    <string name="video_format_kbps">%1$d kbps</string>
+
+    <!-- Progress & Accessibility -->
+    <string name="cd_progress_percent">%1$d percent</string>
+    <string name="cd_piece_groups">%1$d of %2$d piece groups downloaded</string>
+    <string name="cd_connections_downloading">%1$d connections downloading</string>
+    <string name="speak_kb_s">kilobytes per second</string>
+    <string name="speak_mb_s">megabytes per second</string>
+    <string name="speak_gb_s">gigabytes per second</string>
+    <string name="speak_b_s">bytes per second</string>
+
+    <!-- Browser extracted strings -->
+    <string name="browser_saved_file">Saved %1$s (%2$d B)</string>
+    <string name="browser_detected_media">Detected media (%1$d)</string>
+    <string name="browser_no_media_detected">No media detected on this page</string>
+    <string name="browser_allow_ads_on">Allow ads on %1$s</string>
+    <string name="browser_allow_ads_desc">Skip ad, popup, and cosmetic blocking on this site</string>
 </resources>

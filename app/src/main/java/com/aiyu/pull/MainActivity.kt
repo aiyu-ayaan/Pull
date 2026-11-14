@@ -37,6 +37,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var updater: AppUpdater
     private var event by mutableStateOf<AppEvent?>(null)
 
+    override fun attachBaseContext(base: android.content.Context) = super.attachBaseContext(com.aiyu.pull.data.AppLocale.wrap(base))
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)

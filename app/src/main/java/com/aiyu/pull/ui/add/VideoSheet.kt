@@ -167,7 +167,7 @@ internal fun ColumnScope.VideoBody(meta: VideoMeta, url: String, request: AddReq
                     selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                 )
                 FilterChip(selected = maxRes == 0, onClick = { maxRes = 0 }, colors = colors, label = { Text(stringResource(R.string.quality_best)) })
-                resolutions.forEach { r -> FilterChip(selected = maxRes == r, onClick = { maxRes = r }, colors = colors, label = { Text("${r}p") }) }
+                resolutions.forEach { r -> FilterChip(selected = maxRes == r, onClick = { maxRes = r }, colors = colors, label = { Text(stringResource(R.string.video_resolution_p, r)) }) }
             }
         }
         ChoiceCard(
@@ -241,15 +241,16 @@ private fun presetSummary(c: com.aiyu.pull.video.VideoChoice): String = buildLis
             com.aiyu.pull.video.AudioFormat.OPUS -> R.string.audio_opus
         }))
     } else {
-        add(if (c.maxRes > 0) "${c.maxRes}p" else stringResource(R.string.quality_best))
+        add(if (c.maxRes > 0) stringResource(R.string.video_resolution_p, c.maxRes) else stringResource(R.string.quality_best))
         if (c.codec != com.aiyu.pull.video.VideoCodec.ANY) add(c.codec.name.replace("AVC", "H.264"))
         if (c.container != com.aiyu.pull.video.Container.AUTO) add(c.container.name)
         if (c.subtitles) add(stringResource(R.string.opt_subtitles).lowercase())
     }
 }.joinToString(" · ")
 
+@Composable
 private fun describe(ids: String, meta: VideoMeta): String =
-    ids.split('+').mapNotNull { id -> meta.formats.firstOrNull { it.id == id } }.joinToString(" + ") { headline(it) }
+    ids.split('+').mapNotNull { id -> meta.formats.firstOrNull { it.id == id } }.map { headline(it) }.joinToString(" + ")
 
 /** A selectable rounded card; the selected one is tinted and rounder (Seal's single-choice item). */
 @Composable
@@ -348,9 +349,10 @@ private fun FormatPicker(meta: VideoMeta, audioOnly: Boolean, initial: String?, 
     }
 }
 
+@Composable
 private fun headline(f: VideoFormat): String = when {
-    f.hasVideo -> "${f.res}p" + (if (f.fps > 30) "${f.fps}" else "")
-    f.abr > 0 -> "${f.abr} kbps"
+    f.hasVideo -> stringResource(R.string.video_resolution_p, f.res) + (if (f.fps > 30) "${f.fps}" else "")
+    f.abr > 0 -> stringResource(R.string.video_format_kbps, f.abr)
     else -> f.label
 }
 
@@ -371,7 +373,7 @@ private fun FormatCard(f: VideoFormat, selected: Boolean, container: Color, onCl
                 style = MaterialTheme.typography.labelMedium, color = c.onSurfaceVariant, maxLines = 1,
             )
             Text(
-                listOfNotNull(f.sizeBytes.takeIf { it > 0 }?.let(::formatBytes), f.tbr.takeIf { it > 0 }?.let { "$it kbps" }).joinToString(" · ").ifEmpty { f.label },
+                listOfNotNull(f.sizeBytes.takeIf { it > 0 }?.let(::formatBytes), f.tbr.takeIf { it > 0 }?.let { stringResource(R.string.video_format_kbps, it) }).joinToString(" · ").ifEmpty { f.label },
                 style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant, maxLines = 1,
             )
         }

@@ -127,8 +127,8 @@ fun ShieldSheet(
 
             if (host.isNotBlank()) {
                 ListItem(
-                    headlineContent = { Text("Allow ads on $host") },
-                    supportingContent = { Text("Skip ad, popup, and cosmetic blocking on this site") },
+                    headlineContent = { Text(stringResource(R.string.browser_allow_ads_on, host)) },
+                    supportingContent = { Text(stringResource(R.string.browser_allow_ads_desc)) },
                     leadingContent = { Icon(Icons.Rounded.Shield, null) },
                     trailingContent = {
                         Switch(checked = isHostAllowlisted, onCheckedChange = onHostAllowlistToggle)

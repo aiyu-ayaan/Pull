@@ -353,7 +353,7 @@ fun DetectedMediaSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Detected media (${mediaList.size})",
+                    text = stringResource(R.string.browser_detected_media, mediaList.size),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
@@ -374,7 +374,7 @@ fun DetectedMediaSheet(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "No media detected on this page",
+                        text = stringResource(R.string.browser_no_media_detected),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

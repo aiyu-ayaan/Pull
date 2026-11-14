@@ -67,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -208,7 +209,7 @@ fun AddDownloadSheet(
                     ) {
                         Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                         Spacer(Modifier.width(Dimens.sm))
-                        Text("Import .txt URL list")
+                        Text(stringResource(R.string.add_import_txt))
                     }
                     if (isBatch) {
                         Surface(
@@ -216,7 +217,7 @@ fun AddDownloadSheet(
                             color = MaterialTheme.colorScheme.primaryContainer,
                         ) {
                             Text(
-                                text = "Batch: ${batchUrls.size} URLs",
+                                text = pluralStringResource(R.plurals.add_batch_count, batchUrls.size, batchUrls.size),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.padding(horizontal = Dimens.md, vertical = Dimens.sm),
@@ -387,7 +388,7 @@ private fun AdvancedOptionsSection(
                 modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(Dimens.md),
             ) {
                 Text(
-                    text = "Advanced (Mirrors & Checksum)",
+                    text = stringResource(R.string.add_advanced_title),
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
@@ -404,7 +405,7 @@ private fun AdvancedOptionsSection(
                     OutlinedTextField(
                         value = mirrors,
                         onValueChange = onMirrorsChange,
-                        label = { Text("Mirror URLs (one per line)") },
+                        label = { Text(stringResource(R.string.add_mirrors_label)) },
                         placeholder = { Text("https://mirror.example.com/file.zip") },
                         minLines = 2,
                         maxLines = 4,
@@ -413,8 +414,8 @@ private fun AdvancedOptionsSection(
                     OutlinedTextField(
                         value = checksum,
                         onValueChange = onChecksumChange,
-                        label = { Text("Expected Checksum (MD5 / SHA-256)") },
-                        placeholder = { Text("MD5 (32 hex) or SHA-256 (64 hex)") },
+                        label = { Text(stringResource(R.string.add_checksum_label)) },
+                        placeholder = { Text(stringResource(R.string.add_checksum_placeholder)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -439,7 +440,7 @@ private fun ColumnScope.BatchBody(
     val kind = FileKind.of(urls.first(), null)
     Header(
         icon = { ShapeIcon(kind.icon, kind.shape, kind.tone.container, kind.tone.onContainer, size = 40.dp, iconSize = 20.dp) },
-        title = "Batch: ${urls.size} URLs",
+        title = pluralStringResource(R.plurals.add_batch_count, urls.size, urls.size),
         lines = listOf(urls.first(), if (urls.size > 1) "… ${urls.last()}" else "").filter { it.isNotEmpty() },
     )
     Column {

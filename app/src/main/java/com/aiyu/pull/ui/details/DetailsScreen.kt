@@ -341,11 +341,12 @@ private fun Hero(view: DownloadView) {
                 Column(Modifier.weight(1f)) {
                     // Percent with two decimals: it visibly moves every frame at any speed.
                     val percent = if (total > 0 || e.status == Status.COMPLETED) String.format(Locale.getDefault(), "%.2f%%", fraction * 100) else "—"
+                    val percentDesc = stringResource(R.string.cd_progress_percent, (fraction * 100).toInt())
                     Text(
                         percent,
                         style = NumberTextStyle,
                         color = if (e.status == Status.FAILED) c.error else c.primary,
-                        modifier = Modifier.semantics { contentDescription = "${(fraction * 100).toInt()} percent" },
+                        modifier = Modifier.semantics { contentDescription = percentDesc },
                     )
                     Text(
                         if (total > 0) stringResource(R.string.details_of, formatBytes(downloaded), formatBytes(total)) else formatBytes(downloaded),

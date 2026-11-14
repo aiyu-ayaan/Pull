@@ -857,7 +857,7 @@ private class PullBridge(
             val outFile = File(dir, safeName)
             runCatching { outFile.writeBytes(bytes) }
             webView.post {
-                Toast.makeText(context, "Saved $safeName (${bytes.size} B)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.browser_saved_file, safeName, bytes.size), Toast.LENGTH_SHORT).show()
             }
         } else if (dataUrl.startsWith("http://") || dataUrl.startsWith("https://")) {
             webView.post {
