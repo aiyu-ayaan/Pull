@@ -102,6 +102,8 @@ data class AddRequest(
     val pageUrl: String? = null,
     val headers: Map<String, String> = emptyMap(),
     val torrentFile: String? = null,
+    /** MIME type the browser saw on the response; it outranks a probe that comes back as a web page. */
+    val mimeHint: String? = null,
 )
 
 /**
@@ -147,7 +149,7 @@ fun AddDownloadSheet(
         }
         if (request.torrentFile == null) delay(400) // typing debounce
         val targetUrl = batchUrls.singleOrNull() ?: url.trim()
-        vm.analyze(targetUrl, request.headers, request.torrentFile)
+        vm.analyze(targetUrl, request.headers, request.torrentFile, request.mimeHint)
     }
 
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
