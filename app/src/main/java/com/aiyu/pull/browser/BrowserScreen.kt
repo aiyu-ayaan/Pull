@@ -106,6 +106,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -343,7 +344,9 @@ fun BrowserScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             // Swiping the omnibox slides pages sideways like Chrome; other switches cross-fade.
             AnimatedContent(
+                modifier = Modifier.fillMaxSize().clipToBounds(),
                 targetState = tab?.id,
+                contentKey = { it },
                 transitionSpec = {
                     val dir = swipeDir
                     if (dir == 0) {
