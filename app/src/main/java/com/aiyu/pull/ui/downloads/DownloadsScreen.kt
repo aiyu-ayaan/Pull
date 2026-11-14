@@ -166,6 +166,8 @@ fun DownloadsScreen(
     drawerProgress: () -> Float,
     selectedId: Long?,
     modifier: Modifier = Modifier,
+    /** The navigation rail already shows the drawer button and the add FAB. */
+    railMode: Boolean = false,
 ) {
     val rows by vm.downloads.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
@@ -251,7 +253,7 @@ fun DownloadsScreen(
                     LargeFlexibleTopAppBar(
                         title = { Text(stringResource(tab.title)) },
                         navigationIcon = {
-                            IconButton(onClick = onOpenDrawer, shapes = IconButtonDefaults.shapes()) {
+                            if (!railMode) IconButton(onClick = onOpenDrawer, shapes = IconButtonDefaults.shapes()) {
                                 MenuIcon(drawerProgress, Modifier.semantics { contentDescription = context.getString(R.string.cd_open_drawer) })
                             }
                         },
@@ -285,7 +287,7 @@ fun DownloadsScreen(
             }
         },
         floatingActionButton = {
-            if (!inSelection) {
+            if (!inSelection && !railMode) {
                 FloatingActionButtonMenu(
                     modifier = Modifier.padding(bottom = insets.fab),
                     expanded = menuOpen,

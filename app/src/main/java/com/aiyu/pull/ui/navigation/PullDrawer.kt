@@ -1,5 +1,12 @@
 package com.aiyu.pull.ui.navigation
 
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,14 +51,19 @@ fun PullDrawerSheet(
 ) {
     Column(modifier.systemBarsPadding().verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(Dimens.xl)) {
-            ShapeIcon(
-                icon = Icons.Rounded.Download,
-                shape = MaterialShapes.Cookie9Sided,
-                container = MaterialTheme.colorScheme.primaryContainer,
-                content = MaterialTheme.colorScheme.onPrimaryContainer,
-                size = Dimens.xxxl + Dimens.xs,
-                iconSize = Dimens.xl + Dimens.xs,
-            )
+            // The launcher icon itself: brand circle with the comet, cropped to the adaptive icon's 72dp safe zone.
+            androidx.compose.foundation.layout.Box(
+                Modifier
+                    .size(Dimens.xxxl + Dimens.xs)
+                    .clip(CircleShape)
+                    .background(colorResource(R.color.brand)),
+            ) {
+                androidx.compose.foundation.Image(
+                    androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.5f; scaleY = 1.5f },
+                )
+            }
             Spacer(Modifier.width(Dimens.lg))
             Column {
                 Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmallEmphasized)

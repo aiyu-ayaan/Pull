@@ -227,16 +227,20 @@ private fun MainScreen(
                     onAdd = onAdd, onBrowser = onBrowser,
                     onOpenDrawer = onOpenDrawer, drawerProgress = drawerProgress,
                     selectedId = if (pane) selected else null,
+                    railMode = wide,
                 )
             }
         }
         if (wide) {
             Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-                FloatingNavRail(tab, badges, onTab)
+                PullNavRail(tab, badges, onTab, onMenu = onOpenDrawer, menuProgress = drawerProgress, onAdd = { onAdd(true) })
+                // Each pane measures its own width, so readable gutters follow the pane, not the whole window.
                 if (pane) {
-                    list(Modifier.width(420.dp).fillMaxHeight())
-                    DetailPane(selected, vm, onClose = { selected = null }, onOpenPage = onOpenPage, modifier = Modifier.weight(1f))
-                } else list(Modifier.weight(1f).fillMaxHeight())
+                    com.aiyu.pull.ui.components.ProvideContentWidth(Modifier.width(420.dp).fillMaxHeight()) { list(Modifier.fillMaxSize()) }
+                    com.aiyu.pull.ui.components.ProvideContentWidth(Modifier.weight(1f).fillMaxHeight()) {
+                        DetailPane(selected, vm, onClose = { selected = null }, onOpenPage = onOpenPage, modifier = Modifier.fillMaxSize())
+                    }
+                } else com.aiyu.pull.ui.components.ProvideContentWidth(Modifier.weight(1f).fillMaxHeight()) { list(Modifier.fillMaxSize()) }
             }
             return@BoxWithConstraints
         }
@@ -278,8 +282,18 @@ private fun DetailPane(id: Long?, vm: DownloadsViewModel, onClose: () -> Unit, o
         modifier = modifier.fillMaxHeight().padding(8.dp),
     ) {
         if (id == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                MorphingShape(brush = heroBrush(), modifier = Modifier.size(96.dp).alpha(0.4f))
+            androidx.compose.foundation.layout.Column(
+                Modifier.fillMaxSize().padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            ) {
+                MorphingShape(brush = heroBrush(), modifier = Modifier.size(72.dp).alpha(0.5f))
+                androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
+                androidx.compose.material3.Text(
+                    androidx.compose.ui.res.stringResource(com.aiyu.pull.R.string.detail_pane_empty),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         } else {
             // Back closes the pane first, following the predictive gesture.

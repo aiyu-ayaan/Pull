@@ -29,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DownloadDone
 import androidx.compose.material.icons.outlined.Downloading
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material3.Badge
@@ -36,8 +37,6 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -158,33 +157,42 @@ private fun NavIcon(t: Tab, selected: Boolean, badge: Int, tint: Color = LocalCo
     } else icon()
 }
 
-/** Tablets / landscape: the same pill stood upright on the left edge. */
+/**
+ * Tablets / landscape: Material 3 Expressive navigation rail, docked to the left edge at full height. Its header
+ * holds the drawer button and the add FAB, so the content keeps no second hamburger or floating button and the
+ * rail's height is used instead of being a short pill floating in empty space.
+ */
 @Composable
-fun FloatingNavRail(tab: Tab, badges: Map<Tab, Int>, onSelect: (Tab) -> Unit) {
-    Box(
-        Modifier.fillMaxHeight().systemBarsPadding().displayCutoutPadding().padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        // Same full-radius capsule as the phone pill, so the rail reads as that pill stood upright.
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 6.dp) {
-            Column(
-                Modifier.width(96.dp).padding(vertical = 20.dp).verticalScroll(rememberScrollState()).selectableGroup(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Tab.entries.forEach { t ->
-                    NavigationRailItem(
-                        selected = t == tab,
-                        onClick = { onSelect(t) },
-                        icon = { NavIcon(t, t == tab, badges[t] ?: 0) },
-                        label = { Text(stringResource(t.label), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        colors = NavigationRailItemDefaults.colors(
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        ),
-                    )
+fun PullNavRail(
+    tab: Tab,
+    badges: Map<Tab, Int>,
+    onSelect: (Tab) -> Unit,
+    onMenu: () -> Unit,
+    menuProgress: () -> Float,
+    onAdd: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.material3.WideNavigationRail(
+        colors = androidx.compose.material3.WideNavigationRailDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        header = {
+            Column(Modifier.width(96.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                androidx.compose.material3.IconButton(onClick = onMenu, shapes = androidx.compose.material3.IconButtonDefaults.shapes()) {
+                    com.aiyu.pull.ui.components.MenuIcon(menuProgress, Modifier.semantics { contentDescription = context.getString(R.string.cd_open_drawer) })
+                }
+                androidx.compose.material3.FloatingActionButton(onClick = onAdd, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)) {
+                    Icon(androidx.compose.material.icons.Icons.Rounded.Add, stringResource(R.string.fab_add_url))
                 }
             }
+        },
+    ) {
+        Tab.entries.forEach { t ->
+            androidx.compose.material3.WideNavigationRailItem(
+                railExpanded = false,
+                selected = t == tab,
+                onClick = { onSelect(t) },
+                icon = { NavIcon(t, t == tab, badges[t] ?: 0) },
+                label = { Text(stringResource(t.label), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            )
         }
     }
 }
