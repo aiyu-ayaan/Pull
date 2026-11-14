@@ -59,7 +59,7 @@ class AddViewModel @Inject constructor(
     private var job: Job? = null
     private var analyzed: String? = null
 
-    fun analyze(input: String, headers: Map<String, String>, torrentFile: String?) {
+    fun analyze(input: String, headers: Map<String, String>, torrentFile: String?, mimeHint: String? = null) {
         val key = torrentFile ?: input
         if (key == analyzed) return
         analyzed = key
@@ -77,6 +77,9 @@ class AddViewModel @Inject constructor(
                         when {
                             info.mimeType == "application/x-bittorrent" || info.fileName?.endsWith(".torrent", true) == true ->
                                 Analysis.Torrent(torrents.get().parse(manager.fetchTorrent(info.finalUrl, headers)), null, false)
+                            // The browser already got a file here; a probe answered with a page (range quirks, bot checks) is not a video page.
+                            info.mimeType == "text/html" && mimeHint != null && !mimeHint.startsWith("text/html") ->
+                                Analysis.FileLink(info.copy(mimeType = mimeHint))
                             info.mimeType == "text/html" -> Analysis.WebPage(info)
                             else -> Analysis.FileLink(info)
                         }

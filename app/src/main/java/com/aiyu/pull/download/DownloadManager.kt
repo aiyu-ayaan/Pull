@@ -91,6 +91,10 @@ class DownloadManager @Inject constructor(
     }
 
     private val running = ConcurrentHashMap<Long, Running>()
+    /** Queued rows waiting out a transient failure: id to the elapsedRealtime they may start again. */
+    private val retryAt = ConcurrentHashMap<Long, Long>()
+    /** Automatic retries in a row that moved no bytes, per download. Reset by any progress. */
+    private val autoRetries = ConcurrentHashMap<Long, Int>()
     private val scheduleLock = Mutex()
     private val saveLock = Mutex()
     private val _active = MutableStateFlow(0)
@@ -100,7 +104,7 @@ class DownloadManager @Inject constructor(
     val downloads: Flow<List<DownloadEntity>> = dao.observeAll()
     fun download(id: Long): Flow<DownloadEntity?> = dao.observe(id)
 
-    /** Number of downloads moving bytes right now. The service lives exactly as long as this is above 0. */
+    /** Downloads moving bytes or waiting to retry. The service lives exactly as long as this is above 0. */
     val activeCount: StateFlow<Int> = _active.asStateFlow()
     val live: StateFlow<Map<Long, LiveStats>> = _live.asStateFlow()
 
@@ -371,8 +375,11 @@ class DownloadManager @Inject constructor(
                     return@withLock
                 }
                 val max = s.maxDownloads
+                val now = SystemClock.elapsedRealtime()
                 for (e in dao.withStatus(Status.QUEUED)) {
                     if (running.values.count { !it.seeding } >= max) break
+                    if ((retryAt[e.id] ?: 0L) > now) continue
+                    retryAt.remove(e.id)
                     if (!running.containsKey(e.id)) start(e)
                 }
             }
@@ -420,13 +427,42 @@ class DownloadManager @Inject constructor(
                 dao, files,
             )
         }
-        val job = scope.launch(start = CoroutineStart.LAZY) { execute(e.id, transfer) }
+        val job = scope.launch(start = CoroutineStart.LAZY) { execute(e.id, transfer, e.downloadedBytes) }
         running[e.id] = Running(transfer, job)
-        _active.value = running.size
+        updateActive()
         job.start()
     }
 
-    private suspend fun CoroutineScope.execute(id: Long, task: Transfer) {
+    private fun updateActive() { _active.value = running.size + retryAt.size }
+
+    /**
+     * Network drops, Wi-Fi power save and server hiccups overnight outlast the engine's own retries. Instead of failing,
+     * the row goes back to the queue and starts again later; the service (and its wake lock) stays up meanwhile.
+     * Gives up after [MAX_AUTO_RETRIES] attempts in a row that moved no bytes.
+     */
+    private suspend fun retryLater(id: Long, t: Throwable, startBytes: Long): Boolean {
+        val e = t as? DownloadException ?: return false
+        val transient = e.kind == ErrorKind.NETWORK || (e.kind == ErrorKind.HTTP && (e.httpCode >= 500 || e.httpCode == 408 || e.httpCode == 429))
+        if (!transient || !settings.current().autoResume) return false
+        if ((dao.get(id)?.downloadedBytes ?: 0) > startBytes) autoRetries.remove(id)
+        val n = (autoRetries[id] ?: 0) + 1
+        if (n > MAX_AUTO_RETRIES) { autoRetries.remove(id); return false }
+        autoRetries[id] = n
+        val wait = (15_000L shl (n - 1).coerceAtMost(5)).coerceAtMost(5 * 60_000L)
+        retryAt[id] = SystemClock.elapsedRealtime() + wait
+        dao.finish(id, Status.QUEUED, e.kind.name, e.message, null)
+        Log.i(TAG, "Download $id: ${e.message}; retry $n in ${wait / 1000}s")
+        scope.launch {
+            delay(wait)
+            network.awaitConnected()
+            retryAt.remove(id)
+            updateActive()
+            schedule()
+        }
+        return true
+    }
+
+    private suspend fun CoroutineScope.execute(id: Long, task: Transfer, startBytes: Long) {
         val flusher = launch { while (true) { delay(1_000); save(id) } }
         // After COMPLETED is written, a cancel only stops seeding and must not turn the row into PAUSED.
         var completed = false
@@ -438,6 +474,7 @@ class DownloadManager @Inject constructor(
             val e = dao.get(id) ?: return
             dao.finish(id, Status.COMPLETED, null, null, System.currentTimeMillis())
             completed = true
+            autoRetries.remove(id)
             notifier.completed(id, e.fileName, size)
             task.seed { running[id]?.seeding = true; schedule() }
         } catch (c: CancellationException) {
@@ -453,6 +490,7 @@ class DownloadManager @Inject constructor(
             withContext(NonCancellable) {
                 flusher.cancelAndJoin()
                 save(id)
+                if (retryLater(id, t, startBytes)) return@withContext
                 val kind = (t as? DownloadException)?.kind?.name ?: if (t is IOException) ErrorKind.DISK.name else "UNKNOWN"
                 dao.finish(id, Status.FAILED, kind, t.message ?: t.javaClass.simpleName, null)
                 dao.get(id)?.let { notifier.failed(id, it.fileName, kind == ErrorKind.LINK_EXPIRED.name) }
@@ -460,7 +498,7 @@ class DownloadManager @Inject constructor(
             if (t !is DownloadException) Log.w(TAG, "Download $id failed", t)
         } finally {
             running.remove(id)
-            _active.value = running.size
+            updateActive()
             schedule()
         }
     }
@@ -521,6 +559,7 @@ class DownloadManager @Inject constructor(
 
     companion object {
         private const val TAG = "DownloadManager"
+        private const val MAX_AUTO_RETRIES = 30
 
         fun isWithinSchedule(hour: Int, startHour: Int, endHour: Int): Boolean =
             com.aiyu.pull.data.isWithinSchedule(hour, startHour, endHour)

@@ -32,6 +32,7 @@ class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var observing = false
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -47,6 +48,13 @@ class DownloadService : Service() {
         if (!observing) {
             observing = true
             acquireWakeLock()
+            scope.launch {
+                // The lock has a timeout as a safety net; renew it so overnight downloads keep the CPU awake.
+                while (true) {
+                    kotlinx.coroutines.delay(60 * 60 * 1000L)
+                    wakeLock?.acquire(WAKE_TIMEOUT)
+                }
+            }
             scope.launch {
                 combine(manager.live, manager.downloads) { live, rows -> live to rows }
                     .sample(1_000) // notification updates are rate-limited by the system anyway
@@ -78,13 +86,24 @@ class DownloadService : Service() {
         // Only while the service runs, which is only while a download moves bytes. Released in onDestroy.
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Pull:download")
-            .apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
+            .apply { setReferenceCounted(false); acquire(WAKE_TIMEOUT) }
+        // Without it Wi-Fi drops into power save with the screen off and sockets stall until the engine gives up.
+        @Suppress("DEPRECATION")
+        wifiLock = runCatching {
+            getSystemService(android.net.wifi.WifiManager::class.java)
+                .createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "Pull:download")
+                .apply { setReferenceCounted(false); acquire() }
+        }.getOrNull()
     }
 
     override fun onDestroy() {
         scope.cancel()
         wakeLock?.takeIf { it.isHeld }?.release()
+        wifiLock?.takeIf { it.isHeld }?.release()
         super.onDestroy()
     }
 
+    private companion object {
+        const val WAKE_TIMEOUT = 2 * 60 * 60 * 1000L
+    }
 }

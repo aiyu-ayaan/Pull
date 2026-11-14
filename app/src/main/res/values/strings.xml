@@ -526,4 +526,15 @@
     <string name="browser_shortcut_title_hint">Name (optional)</string>
     <string name="browser_shortcut_url_hint">URL (e.g. example.com)</string>
     <string name="browser_shortcuts">Shortcuts</string>
+    <string name="browser_shortcut_remove">Remove</string>
+    <plurals name="browser_media_count">
+        <item quantity="one">%d media</item>
+        <item quantity="other">%d media</item>
+    </plurals>
+    <string name="browser_continue_tab">Continue with this tab</string>
+    <string name="browser_see_more">See more</string>
+    <plurals name="browser_tab_count">
+        <item quantity="one">%d tab</item>
+        <item quantity="other">%d tabs</item>
+    </plurals>
 </resources>

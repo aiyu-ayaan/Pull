@@ -65,6 +65,10 @@ class BrowserViewModel @Inject constructor(
 
     fun target(id: Long): Flow<DownloadEntity?> = if (id >= 0) manager.download(id) else flowOf(null)
 
+    /** MIME type behind [url], or null when the probe fails. */
+    suspend fun probeMime(url: String, headers: Map<String, String>): String? =
+        runCatching { manager.probe(url, headers).mimeType ?: "application/octet-stream" }.getOrNull()
+
     fun refresh(id: Long, url: String, headers: Map<String, String>, pageUrl: String?) =
         manager.refreshLink(id, url, headers, pageUrl)
 
