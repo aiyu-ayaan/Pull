@@ -116,6 +116,13 @@ Layouts adapt to the window: phones get a floating tab pill; from 600dp the app 
 with the drawer button and add button in its header; from 920dp the download list and the details pane sit side by
 side. Content keeps a readable width on wide screens.
 
+### Languages
+Pull is translated into 27 languages: English, Arabic, Bengali, Chinese (Simplified and Traditional), French, German,
+Gujarati, Hindi, Indonesian, Italian, Japanese, Kannada, Korean, Malayalam, Marathi, Polish, Portuguese (Brazil),
+Punjabi, Russian, Spanish, Tamil, Telugu, Thai, Turkish, Urdu and Vietnamese. By default Pull follows the system
+language. To change it, open **Settings → Language**. On Android 13 and up the choice also appears in the system's
+per-app language settings. The list lives in `AppLocale.tags` and the `values-*` folders.
+
 ### Privacy
 No accounts and no telemetry. The browser never continues past an SSL error.
 

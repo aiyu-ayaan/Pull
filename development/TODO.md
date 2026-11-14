@@ -112,6 +112,7 @@ Design docs: [docs/README.md](docs/README.md). Phases follow `docs/07-features-a
 - [x] Media sniffer: m3u8/mpd/video detection, "N media found" chip
 - [ ] HLS download with parallel segments + remux to MP4
 - [x] Scheduler, QR scan, batch URL patterns, import URL list
+- [x] Per-app language: 27 locales, Settings → Language
 - [ ] `Notification.ProgressStyle` on API 36+
 - [ ] Evaluate User-Initiated Data Transfer jobs vs `specialUse` FGS
 
