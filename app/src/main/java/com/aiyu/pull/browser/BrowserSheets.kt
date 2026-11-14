@@ -278,9 +278,11 @@ fun HistorySheet(
 fun AddShortcutDialog(
     onAdd: (url: String, title: String) -> Unit,
     onDismiss: () -> Unit,
+    initialUrl: String = "",
+    initialTitle: String = "",
 ) {
-    var url by rememberSaveable { mutableStateOf("") }
-    var title by rememberSaveable { mutableStateOf("") }
+    var url by rememberSaveable { mutableStateOf(initialUrl) }
+    var title by rememberSaveable { mutableStateOf(initialTitle) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.browser_add_shortcut)) },
